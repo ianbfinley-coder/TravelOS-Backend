@@ -16,6 +16,7 @@ import attractionsRoutes from './routes/attractions.js';
 import flightsRoutes from './routes/flights.js';
 import eventsRoutes from './routes/events.js';
 import mapRoutes from './routes/map.js';
+import authRoutes from './routes/auth.js';
 
 dotenv.config({ path: '.env.local' });
 
@@ -42,6 +43,7 @@ app.locals.supabase = supabase;
 app.locals.redis = redis;
 
 // Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/air-quality', airQualityRoutes);
 app.use('/api/places', placesRoutes);
 app.use('/api/attractions', attractionsRoutes);
