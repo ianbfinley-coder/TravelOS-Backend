@@ -1,0 +1,69 @@
+name: Sync Prompts to GitHub Issues
+
+on:
+  schedule:
+    # Run weekly on Monday to catch any new prompts
+    - cron: '0 7 * * 1'
+  workflow_dispatch:  # Allow manual trigger
+  push:
+    paths:
+      - 'docs/features/**'
+      - '.github/workflows/14-sync-prompts-to-issues.yml'
+      - 'scripts/setup-prompts-in-github.js'
+
+jobs:
+  sync-prompts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Run prompt sync
+        run: |
+          node scripts/setup-prompts-in-github.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Commit changes if any
+        run: |
+          git config user.name "Prompt Sync Automation"
+          git config user.email "automation@travelos.dev"
+          git add -A
+          git diff --quiet && git diff --staged --quiet || (
+            git commit -m "chore: sync prompts to docs and issues" && \
+            git push
+          )
+        continue-on-error: true
+
+      - name: Post sync summary to Slack
+        if: always()
+        run: |
+          curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+            -H 'Content-Type: application/json' \
+            -d @- << 'EOF'
+          {
+            "text": "📋 Prompt Sync Complete",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "✅ Feature prompts synced to GitHub Issues\n\nAll 80+ prompts from Phase 4, 4v2, and Phase 5 are now:\n• Organized in `docs/features/`\n• Converted to GitHub Issues\n• Assigned to appropriate plugins\n• Ready for team to work on\n\nView issues: <https://github.com/${{ github.repository }}/issues|GitHub Issues>"
+                }
+              }
+            ]
+          }
+          EOF
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

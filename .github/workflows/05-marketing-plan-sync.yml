@@ -1,0 +1,57 @@
+name: Marketing Plan Sync
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  sync-marketing:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check marketing plan
+        run: |
+          echo "Checking marketing plan..."
+          if [ -f "claude/TravelOS_Marketing_Plan_Complete.md" ]; then
+            echo "✅ Marketing plan found"
+          else
+            echo "⚠️ Marketing plan not found"
+          fi
+
+      - name: Create marketing sync issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '[MARKETING] Weekly content calendar sync',
+              body: 'Weekly marketing plan review and content calendar planning',
+              labels: ['marketing', 'weekly']
+            });
+            console.log('Created issue #' + issue.data.number);
+        continue-on-error: true
+
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "📋 Weekly Marketing Sync",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Marketing Plan Sync*\n📅 Weekly planning started\n🔗 <${{ github.server_url }}/${{ github.repository }}/issues|View Issues>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        continue-on-error: true

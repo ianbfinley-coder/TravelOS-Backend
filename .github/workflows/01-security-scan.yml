@@ -1,0 +1,40 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run npm audit
+        run: npm audit
+        continue-on-error: true
+
+      - name: Notify Slack on security issues
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "🔒 Security Scan Completed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Security Scan Results*\n✅ Scan completed\n🔗 <${{ github.server_url }}/${{ github.repository }}/security|View Details>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        continue-on-error: true

@@ -1,0 +1,47 @@
+{
+  "name": "travelos-backend",
+  "version": "1.0.0",
+  "description": "TravelOS backend API with rate limiting, cost tracking, and alerts",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "dev": "nodemon src/index.js",
+    "build": "cd frontend && npm run build"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "axios": "^1.6.0",
+    "@supabase/supabase-js": "^2.38.0",
+    "redis": "^4.6.0",
+    "winston": "^3.11.0",
+    "nodemailer": "^6.9.0",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3",
+    "@types/jest": "^29.5.8",
+    "babel-jest": "^29.7.0",
+    "@babel/core": "^7.23.5",
+    "@babel/preset-env": "^7.23.5",
+    "nodemon": "^3.0.1"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": ["**/tests/**/*.test.js"],
+    "transform": {
+      "^.+\\.js$": "babel-jest"
+    },
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/index.js",
+      "!src/tests/**"
+    ]
+  }
+}

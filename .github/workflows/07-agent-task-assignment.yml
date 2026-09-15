@@ -1,0 +1,57 @@
+name: Agent Task Assignment
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  assign-tasks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create daily agent tasks
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const today = new Date();
+            const dayName = dayNames[today.getDay()];
+
+            console.log('Creating tasks for: ' + dayName);
+
+            // Example: Create Monday tasks
+            if (dayName === 'Monday') {
+              const issue1 = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '[MARKETING-AGENT] Create week content calendar',
+                body: 'Plan and create social content calendar for the week',
+                labels: ['marketing', 'weekly']
+              });
+              console.log('Created issue #' + issue1.data.number);
+            }
+        continue-on-error: true
+
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "🤖 Agent Tasks Assigned",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Daily Agent Task Assignment*\n📋 Tasks created for today's agents\n🔗 <${{ github.server_url }}/${{ github.repository }}/issues|View All Tasks>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        continue-on-error: true

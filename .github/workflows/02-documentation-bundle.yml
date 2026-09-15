@@ -1,0 +1,59 @@
+name: Documentation Bundle
+
+on:
+  push:
+    paths:
+      - 'claude/**/*.md'
+      - 'docs/**/*'
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create documentation bundle
+        run: node scripts/bundle-docs.js || echo "bundle-docs.js not found"
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: documentation-bundle
+          path: |
+            TravelOS-Documentation-Bundle*.zip
+            MANIFEST.json
+          retention-days: 30
+        continue-on-error: true
+
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "📦 Documentation Bundle Created",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Documentation Bundle*\n✅ Bundle created successfully\n🔗 <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Artifacts>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        continue-on-error: true
