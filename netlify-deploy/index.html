@@ -603,8 +603,10 @@
   function renderProposalDetails(p) {
     if (!p) return "";
     var rows = [];
-    var goal = p.interpreted_goal || p.goal;
-    if (goal) rows.push("<div><strong>Goal:</strong> " + esc(goal) + "</div>");
+    // FIX 2026-09-22: user asked for a customer-facing card, not an
+    // internal-debug-feeling one - dropped the raw Goal restatement,
+    // Affected days list, and Confidence score (see below), kept
+    // everything that describes the actual change in plain language.
     if (p.clarification_question) {
       rows.push("<div><strong>Needs clarification:</strong> " + esc(p.clarification_question) + "</div>");
     }
@@ -635,10 +637,6 @@
     if (Array.isArray(p.warnings) && p.warnings.length) {
       rows.push("<div><strong>Warnings:</strong> " + esc(p.warnings.join(", ")) + "</div>");
     }
-    if (Array.isArray(p.affected_days) && p.affected_days.length) {
-      rows.push("<div><strong>Affected days:</strong> " + esc(p.affected_days.join(", ")) + "</div>");
-    }
-    if (p.confidence) rows.push("<div class=\"note\" style=\"margin-top:4px\">Confidence: " + esc(p.confidence) + "</div>");
     if (!rows.length) return "";
     return "<div class=\"proposal-details\" style=\"margin-top:8px;padding:10px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;font-size:0.9em\">" + rows.join("") + "</div>";
   }
