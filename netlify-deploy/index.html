@@ -317,7 +317,7 @@
           <div><label class="f" for="tDest">Destination</label><input id="tDest" type="text" placeholder="Lisbon, Portugal"></div>
           <div><label class="f" for="tStart">Starts</label><input id="tStart" type="date"></div>
           <div><label class="f" for="tEnd">Ends</label><input id="tEnd" type="date"></div>
-          <div><label class="f" for="tTz">Time zone</label><input id="tTz" type="text" placeholder="Europe/Lisbon"></div>
+          <div><label class="f" for="tTz">Time zone</label><select id="tTz"></select></div>
           <div><label class="f" for="tStatus">Status</label><input id="tStatus" type="text" placeholder="planning"></div>
         </div>
         <div class="row" style="margin-top:12px">
@@ -369,6 +369,29 @@
         <p class="err" id="itErr" style="margin:10px 0 0" hidden></p>
       </form>
       <div id="itList"></div>
+    </div>
+  </section>
+
+  <!-- ── currency converter (flag fx_converter) ─────────────── -->
+  <section class="panel" id="fxPanel" hidden style="margin-top:16px">
+    <header>
+      <h2>Currency</h2>
+      <button id="fxRefresh" class="ghost tiny" type="button">Refresh rates</button>
+    </header>
+    <div class="body">
+      <div class="grid2">
+        <div><label class="f" for="fxAmt">Amount</label><input id="fxAmt" type="text" inputmode="decimal" value="100"></div>
+        <div></div>
+        <div><label class="f" for="fxFrom">From</label><select id="fxFrom"></select></div>
+        <div><label class="f" for="fxTo">To</label><select id="fxTo"></select></div>
+      </div>
+      <div class="row" style="margin-top:10px;align-items:center">
+        <div class="shrink"><button id="fxSwap" class="ghost tiny" type="button">Swap</button></div>
+        <div style="min-width:0"><div id="fxResult" style="font-size:22px;font-weight:600"></div></div>
+      </div>
+      <p id="fxAsOf" class="note" style="margin:8px 0 0"></p>
+      <p id="fxWarn" class="note" style="margin:4px 0 0;color:#d99a1e" hidden></p>
+      <p id="fxAttrib" class="note" style="margin:4px 0 0" hidden><a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">Rates By Exchange Rate API</a></p>
     </div>
   </section>
 
@@ -809,6 +832,7 @@
     $("tripPanel").hidden = true;
     $("itinPanel").hidden = true;
     $("aiPanel").hidden = true;
+    $("fxPanel").hidden = true;
     $("workArea").hidden = true;
     selectedTripId = null;
   });
@@ -827,7 +851,7 @@
 
   // ── trips ──────────────────────────────────────────────────
   function newTripDefaults() {
-    return { id: "", name: "", destination: "", start_date: "", end_date: "", primary_tz: "", status: "planning" };
+    return { id: "", name: "", destination: "", start_date: "", end_date: "", primary_tz: browserTz(), status: "planning" };
   }
 
   var selectedTripId = null;
@@ -846,6 +870,7 @@
     $("workArea").hidden = trips.length === 0;
     $("itinPanel").hidden = trips.length === 0;
     $("aiPanel").hidden = trips.length === 0;
+    fxInit();
     if (trips.length) onTripChange(); else openTripEditor(true);
   }
 
@@ -883,6 +908,7 @@
     loadReservations();
     loadDerived();
     loadItinerary();
+    fxOnTripChange();
     $("tripForm").hidden = true;
   }
 
@@ -897,7 +923,7 @@
     $("tDest").value = t.destination || "";
     $("tStart").value = t.start_date || "";
     $("tEnd").value = t.end_date || "";
-    $("tTz").value = t.primary_tz || "";
+    fillTzSelect(t.primary_tz || browserTz());
     $("tStatus").value = t.status || "planning";
     $("tripErr").hidden = true;
     f.hidden = false;
@@ -1196,11 +1222,50 @@
     }).join("");
   }
 
+  // FIX 2026-09-23: times are shown and saved in the TRIP's time zone
+  // (trips.primary_tz), not the browser's. Previously a Lisbon item typed as
+  // 10:00 by someone in New York was stored as 10:00 New York time.
+  function browserTz() {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch (e) { return "UTC"; }
+  }
+  function validTz(tz) {
+    if (!tz) return null;
+    try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return tz; } catch (e) { return null; }
+  }
+  function tripTz() {
+    var t = currentTrip();
+    return validTz(t && t.primary_tz) || browserTz();
+  }
+  function tzParts(date, tz) {
+    var p = {};
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit",
+      day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+      .formatToParts(date).forEach(function (x) { p[x.type] = x.value; });
+    return p;
+  }
+  function tzOffsetMs(date, tz) {
+    var p = tzParts(date, tz);
+    var asUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second);
+    return asUtc - (date.getTime() - date.getMilliseconds());
+  }
   function clock(iso) {
     if (!iso) return "--:--";
     var d = new Date(iso);
     if (isNaN(d)) return "--:--";
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    var p = tzParts(d, tripTz());
+    return (p.hour === "24" ? "00" : p.hour) + ":" + p.minute;
+  }
+  var TZ_LIST = null;
+  function fillTzSelect(value) {
+    var sel = $("tTz");
+    if (!TZ_LIST) {
+      try { TZ_LIST = Intl.supportedValuesOf("timeZone"); } catch (e) { TZ_LIST = []; }
+      if (TZ_LIST.indexOf("UTC") < 0) TZ_LIST = ["UTC"].concat(TZ_LIST);
+    }
+    var list = TZ_LIST.slice();
+    if (value && list.indexOf(value) < 0) list.unshift(value);
+    sel.innerHTML = list.map(function (z) { return '<option value="' + esc(z) + '">' + esc(z.replace(/_/g, " ")) + "</option>"; }).join("");
+    sel.value = value || browserTz();
   }
   function dayLabel(d) {
     if (d === "undated") return "No day set";
@@ -1211,7 +1276,12 @@
 
   function isoAt(dateStr, timeStr) {
     if (!dateStr || !timeStr) return null;
-    return new Date(dateStr + "T" + timeStr + ":00").toISOString();
+    var tz = tripTz();
+    var guess = new Date(dateStr + "T" + timeStr + ":00Z");
+    if (isNaN(guess)) return null;
+    var instant = new Date(guess.getTime() - tzOffsetMs(guess, tz));
+    instant = new Date(guess.getTime() - tzOffsetMs(instant, tz)); // settle across DST edges
+    return instant.toISOString();
   }
 
   $("toggleItAdd").addEventListener("click", function () {
@@ -1296,6 +1366,99 @@
     editingItem = null;
     loadItinerary();
   });
+
+  // ── currency converter (fx-rates backend, flag fx_converter) ──
+  var FX_STORE = "travelos.fx.v1";
+  var fx = { latest: null, currencies: [], savedAt: 0, offline: false, enabled: false, userPickedTo: false };
+  var COUNTRY_CCY = { portugal: "EUR", spain: "EUR", france: "EUR", italy: "EUR", germany: "EUR", greece: "EUR",
+    ireland: "EUR", netherlands: "EUR", austria: "EUR", belgium: "EUR", japan: "JPY", "united kingdom": "GBP",
+    england: "GBP", scotland: "GBP", uk: "GBP", mexico: "MXN", canada: "CAD", switzerland: "CHF", australia: "AUD",
+    "new zealand": "NZD", thailand: "THB", china: "CNY", "south korea": "KRW", korea: "KRW", india: "INR",
+    brazil: "BRL", turkey: "TRY", "united arab emirates": "AED", uae: "AED", iceland: "ISK", norway: "NOK",
+    sweden: "SEK", denmark: "DKK", poland: "PLN", "czech republic": "CZK", hungary: "HUF", kuwait: "KWD",
+    morocco: "MAD", "south africa": "ZAR", singapore: "SGD", "hong kong": "HKD", israel: "ILS", egypt: "EGP" };
+  function fxDestCcy() {
+    var t = currentTrip();
+    var d = ((t && t.destination) || "").toLowerCase();
+    if (/\b(usa|united states)\b/.test(d) || /,\s*[a-z]{2}(,|$)/.test(d) && /\b(ny|nm|nv|ca|fl|tx|il|wa|ma)\b/.test(d)) return "USD";
+    var keys = Object.keys(COUNTRY_CCY);
+    for (var i = 0; i < keys.length; i++) if (d.indexOf(keys[i]) >= 0) return COUNTRY_CCY[keys[i]];
+    return null;
+  }
+  function fxReadCache() {
+    try { var c = JSON.parse(localStorage.getItem(FX_STORE) || "null"); if (c && c.latest) { fx.latest = c.latest; fx.currencies = c.currencies || []; fx.savedAt = c.savedAt || 0; } } catch (e) { /* ignore */ }
+  }
+  function fxWriteCache() {
+    try { localStorage.setItem(FX_STORE, JSON.stringify({ latest: fx.latest, currencies: fx.currencies, savedAt: fx.savedAt })); } catch (e) { /* ignore */ }
+  }
+  async function fxFetch(force) {
+    if (!force && fx.latest && Date.now() - fx.savedAt < 24 * 3600 * 1000) { fx.offline = false; return; }
+    var a, b;
+    try {
+      a = await call("GET", "/functions/v1/fx-rates/latest?base=USD");
+      b = await call("GET", "/functions/v1/fx-rates/currencies");
+    } catch (e) { fx.offline = !!fx.latest; return; }
+    if (a.ok && a.data && a.data.success) {
+      fx.latest = a.data.data;
+      if (b.ok && b.data && b.data.success) fx.currencies = b.data.data.currencies || [];
+      fx.savedAt = Date.now(); fx.offline = false; fxWriteCache();
+    } else {
+      fx.offline = !!fx.latest;
+      if (!fx.latest) $("fxAsOf").textContent = (a.data && a.data.error && a.data.error.message) || "Exchange rates are unavailable right now.";
+    }
+  }
+  function fxFillSelects() {
+    var codes = fx.currencies.length ? fx.currencies : Object.keys((fx.latest && fx.latest.rates) || {}).sort().map(function (c) { return { iso_code: c, name: c }; });
+    var html = codes.map(function (c) { return '<option value="' + esc(c.iso_code) + '">' + esc(c.iso_code + " · " + c.name) + "</option>"; }).join("");
+    var f = $("fxFrom").value || "USD", t = $("fxTo").value || fxDestCcy() || "EUR";
+    $("fxFrom").innerHTML = html; $("fxTo").innerHTML = html;
+    $("fxFrom").value = f; $("fxTo").value = t;
+  }
+  function fxRender() {
+    var L = fx.latest;
+    if (!L) { $("fxResult").textContent = ""; return; }
+    var from = $("fxFrom").value, to = $("fxTo").value;
+    var amt = parseFloat(String($("fxAmt").value).replace(/,/g, ""));
+    var rf = L.rates[from], rt = L.rates[to];
+    if (!rf || !rt) {
+      $("fxResult").textContent = "No rate is available for " + from + " to " + to + ".";
+    } else if (!isFinite(amt)) {
+      $("fxResult").textContent = "Enter an amount.";
+    } else {
+      var mu = (L.minor_units && L.minor_units[to] != null) ? L.minor_units[to] : 2;
+      var val = Math.round(amt * (rt / rf) * Math.pow(10, mu)) / Math.pow(10, mu);
+      $("fxResult").textContent = val.toLocaleString(undefined, { minimumFractionDigits: mu, maximumFractionDigits: mu }) + " " + to;
+    }
+    var src = (L.sources || []).join(" + ");
+    $("fxAsOf").textContent = fx.offline ? "Offline · rates as of " + L.as_of : "Mid-market rate · as of " + L.as_of + " · " + src;
+    var w = $("fxWarn");
+    w.hidden = !L.stale; w.textContent = L.stale ? "Rates may be out of date (last updated " + L.as_of + ")." : "";
+    $("fxAttrib").hidden = (L.sources || []).indexOf("exchangerate-api") < 0;
+  }
+  async function fxInit() {
+    var f = await call("GET", "/rest/v1/feature_flags?select=enabled&flag=eq.fx_converter");
+    fx.enabled = !!(f.ok && f.data && f.data[0] && f.data[0].enabled);
+    $("fxPanel").hidden = !fx.enabled || trips.length === 0;
+    if (!fx.enabled) return;
+    fxReadCache();
+    await fxFetch(false);
+    fxFillSelects();
+    fxRender();
+  }
+  function fxOnTripChange() {
+    if (!fx.enabled || fx.userPickedTo) return;
+    var c = fxDestCcy();
+    if (c && c !== $("fxFrom").value && fx.latest && fx.latest.rates[c]) { $("fxTo").value = c; fxRender(); }
+  }
+  $("fxAmt").addEventListener("input", fxRender);
+  $("fxFrom").addEventListener("change", fxRender);
+  $("fxTo").addEventListener("change", function () { fx.userPickedTo = true; fxRender(); });
+  $("fxSwap").addEventListener("click", function () {
+    var a = $("fxFrom").value; $("fxFrom").value = $("fxTo").value; $("fxTo").value = a; fx.userPickedTo = true; fxRender();
+  });
+  $("fxRefresh").addEventListener("click", async function () { await fxFetch(true); fxFillSelects(); fxRender(); });
+  window.addEventListener("offline", function () { if (fx.latest) { fx.offline = true; fxRender(); } });
+  window.addEventListener("online", function () { fx.offline = false; fxRender(); });
 
   // ── AI tools ───────────────────────────────────────────────
   function showAiTab(which) {
