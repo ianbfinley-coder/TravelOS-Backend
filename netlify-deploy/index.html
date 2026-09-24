@@ -263,12 +263,17 @@
     </header>
     <div class="body">
       <div id="signedOut">
+        <div class="tabs" id="modeTabs" role="tablist" aria-label="Sign in or create an account">
+          <button id="modeIn" class="tab on" type="button" role="tab" aria-selected="true">Sign in</button>
+          <button id="modeUp" class="tab" type="button" role="tab" aria-selected="false">Create account</button>
+        </div>
+
         <div style="margin-bottom:12px">
           <label class="f" for="email">Email</label>
           <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
         </div>
 
-        <div class="tabs" role="tablist">
+        <div class="tabs" id="methodTabs" role="tablist">
           <button id="tabPassword" class="tab on" type="button" role="tab" aria-selected="true">Password</button>
           <button id="tabCode" class="tab" type="button" role="tab" aria-selected="false">Email a code</button>
         </div>
@@ -306,6 +311,19 @@
           </div>
         </div>
 
+        <div id="paneSignUp" hidden>
+          <label class="f" for="suPw1">Password</label>
+          <input id="suPw1" type="password" autocomplete="new-password" placeholder="At least 15 characters">
+          <p class="note tiny" id="suPwCount" style="margin:4px 0 8px">0/15</p>
+          <label class="f" for="suPw2">Confirm password</label>
+          <input id="suPw2" type="password" autocomplete="new-password">
+          <p class="note tiny" style="margin:6px 0 0">Passwords found in known data breaches are rejected.</p>
+          <div class="row" style="margin-top:10px">
+            <div class="shrink"><button id="createAccount" type="button">Create account</button></div>
+          </div>
+          <p class="note" id="signUpSent" style="margin:10px 0 0" hidden></p>
+        </div>
+
         <div id="paneCode" hidden>
           <div id="stepEmail">
             <div class="row">
@@ -330,6 +348,11 @@
         </div>
 
         <div id="captchaBox" style="margin-top:12px"></div>
+
+        <div id="socialBox" style="margin-top:14px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><span style="flex:1;height:1px;background:var(--line)"></span><span class="note tiny">or continue with</span><span style="flex:1;height:1px;background:var(--line)"></span></div>
+          <button id="googleBtn" class="ghost" type="button" style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg><span>Continue with Google</span></button>
+        </div>
 
         <div id="paneMfa" hidden>
           <p class="note tiny" style="margin:0 0 8px">Two-step verification is on for this account. Enter the 6-digit code from your authenticator app.</p>
@@ -373,6 +396,33 @@
               <div class="shrink"><button id="savePwChange" type="button">Update password</button></div>
             </div>
             <p class="note" id="chPwMsg" style="margin:8px 0 0" hidden></p>
+          </div>
+        </details>
+        <details id="mfaDetails" style="margin-top:12px">
+          <summary class="note" style="cursor:pointer">Two-step verification</summary>
+          <div style="margin-top:8px">
+            <div id="mfaOff" hidden>
+              <p class="note" style="margin:0 0 8px">Add a second step at sign-in: a 6-digit code from an authenticator app such as Google Authenticator, 1Password or Authy.</p>
+              <button id="mfaStart" type="button">Set up</button>
+            </div>
+            <div id="mfaEnroll" hidden>
+              <p class="note" style="margin:0 0 8px">Scan this QR code with your authenticator app, or type the key into it. Then enter the 6-digit code the app shows.</p>
+              <img id="mfaQr" alt="QR code for your authenticator app" width="180" height="180" style="display:block;background:#fff;border-radius:12px;padding:8px;margin-bottom:8px">
+              <p class="note tiny" style="margin:0 0 8px">Key: <span id="mfaSecret" class="mono" style="word-break:break-all"></span></p>
+              <div class="row">
+                <div>
+                  <label class="f" for="mfaNewCode">Code from the app</label>
+                  <input id="mfaNewCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" class="mono">
+                </div>
+                <div class="shrink"><button id="mfaConfirm" type="button">Turn on</button></div>
+                <div class="shrink"><button id="mfaCancel" class="ghost" type="button">Cancel</button></div>
+              </div>
+            </div>
+            <div id="mfaOn" hidden>
+              <p class="note" style="margin:0 0 8px"><span class="chip ok">On</span> You're asked for a code from your authenticator app each time you sign in.</p>
+              <button id="mfaDisable" class="danger" type="button">Turn off</button>
+            </div>
+            <p class="note" id="mfaMsg" style="margin:8px 0 0" hidden></p>
           </div>
         </details>
       </div>
@@ -818,6 +868,8 @@
   }
 
   function showTab(which) {
+    $("paneSignUp").hidden = true;
+    setModeUi("in");
     var pw = which === "password";
     $("tabPassword").classList.toggle("on", pw);
     $("tabCode").classList.toggle("on", !pw);
@@ -911,8 +963,11 @@
     $("paneMfa").hidden = !on;
     var cb = $("captchaBox");
     if (cb) cb.hidden = on;
-    var tabs = document.querySelector("#signedOut .tabs");
+    var tabs = $("methodTabs");
     if (tabs) tabs.hidden = on;
+    $("modeTabs").hidden = on;
+    $("socialBox").hidden = on;
+    if (on) $("paneSignUp").hidden = true;
     if (on) { $("panePassword").hidden = true; $("paneCode").hidden = true; }
     else showTab("password");
   }
@@ -938,6 +993,7 @@
     }
     saveSession(normalize(d));
     noteWeakPassword(d);
+    ensurePlatform(false);
     renderAuth();
     loadTrips();
   }
@@ -960,6 +1016,7 @@
       showMfa(false);
       saveSession(normalize(v.data));
       noteWeakPassword({ weak_password: weak });
+      ensurePlatform(false);
       renderAuth();
       loadTrips();
     } catch (e) {
@@ -1041,6 +1098,8 @@
     saveSession(null);
     noteWeakPassword(null);
     if ($("pwDetails")) $("pwDetails").open = false;
+    if ($("mfaDetails")) $("mfaDetails").open = false;
+    platformReady = false;
     trips = []; reservations = [];
     renderAuth();
     $("tripPanel").hidden = true;
@@ -1169,7 +1228,7 @@
       // rollback if it fails), which itinerary_items/reservations reads and
       // writes require. A trip created without it is permanently unreachable
       // for anything gated on trip membership.
-      var created = await call("POST", "/functions/v1/platform-trips/trips", {
+      var created = await createTripCall({
         body: {
           title: patch.name || "Untitled trip",
           startDate: patch.start_date,
@@ -1952,8 +2011,10 @@
     b.hidden = false;
   }
   function setSignInChrome(on) {
-    var tabs = document.querySelector("#signedOut .tabs");
+    var tabs = $("methodTabs");
     if (tabs) tabs.hidden = !on;
+    $("modeTabs").hidden = !on;
+    $("socialBox").hidden = !on;
     var cb = $("captchaBox");
     if (cb) cb.hidden = !on;
   }
@@ -2109,6 +2170,210 @@
     } catch (e) {
       chMsg(NETWORK_HINT, true);
     } finally { this.disabled = false; }
+  });
+
+  // ADDED 2026-09-24 (parity with mobile): create account, Google sign-in,
+  // platform registration and two-step verification setup.
+  //
+  // Platform registration: platform-trips resolves the caller through
+  // auth_identities, which only platform-auth /sign-in creates. The mobile app
+  // calls it at every sign-in; the web app never did, so an account created on
+  // the web would have been refused ("Sign in required") the first time it
+  // created a trip. /sign-in also records a device row per call, so the web
+  // registers once per browser and account, and again only if a create is
+  // refused with 401.
+  var platformReady = false;
+  async function ensurePlatform(force) {
+    if (!session || !session.access_token) return false;
+    var key = "travelos_platform_" + (session.user_id || "");
+    if (!force) {
+      if (platformReady) return true;
+      try { if (localStorage.getItem(key)) { platformReady = true; return true; } } catch (e) { /* private window */ }
+    }
+    try {
+      var r = await call("POST", "/functions/v1/platform-auth/sign-in", { body: { deviceLabel: "Web browser" } });
+      if (!r.ok) { console.warn("[TravelOS] platform-auth/sign-in refused:", r.status, r.detail); return false; }
+      platformReady = true;
+      try { localStorage.setItem(key, (r.data && r.data.deviceId) || "1"); } catch (e) { /* private window */ }
+      return true;
+    } catch (e) {
+      console.warn("[TravelOS] platform-auth/sign-in failed:", e);
+      return false;
+    }
+  }
+  async function createTripCall(opts) {
+    // One key per create attempt, reused for the retry, so a retry can never
+    // make a second trip.
+    opts.headers = Object.assign({}, opts.headers || {}, { "Idempotency-Key": crypto.randomUUID() });
+    var r = await call("POST", "/functions/v1/platform-trips/trips", opts);
+    if (r.status === 401 && await ensurePlatform(true)) {
+      r = await call("POST", "/functions/v1/platform-trips/trips", opts);
+    }
+    return r;
+  }
+
+  // Sign in / Create account, like the mobile toggle.
+  function setModeUi(m) {
+    var up = m === "up";
+    $("modeIn").classList.toggle("on", !up);
+    $("modeUp").classList.toggle("on", up);
+    $("modeIn").setAttribute("aria-selected", String(!up));
+    $("modeUp").setAttribute("aria-selected", String(up));
+  }
+  function setMode(m) {
+    if (m === "up") {
+      setModeUi("up");
+      $("methodTabs").hidden = true;
+      $("panePassword").hidden = true;
+      $("paneCode").hidden = true;
+      $("paneForgot").hidden = true;
+      $("paneSignUp").hidden = false;
+      $("signUpSent").hidden = true;
+      authError("");
+      updatePwCount("suPw1", "suPwCount");
+    } else {
+      $("methodTabs").hidden = false;
+      showTab("password");
+    }
+  }
+  $("modeIn").addEventListener("click", function () { setMode("in"); });
+  $("modeUp").addEventListener("click", function () { setMode("up"); });
+  $("suPw1").addEventListener("input", function () { updatePwCount("suPw1", "suPwCount"); });
+  $("createAccount").addEventListener("click", async function () {
+    var email = $("email").value.trim().toLowerCase();
+    var p1 = $("suPw1").value, p2 = $("suPw2").value;
+    if (!email) { authError("Enter your email address above."); return; }
+    if (p1.length < 15) { authError("Use at least 15 characters."); return; }
+    if (p1 !== p2) { authError("The two passwords don't match."); return; }
+    if (captchaWidget !== null && !captchaToken) { authError("Please wait for the security check below to finish, then try again."); return; }
+    authError("");
+    this.disabled = true;
+    try {
+      var r = await call("POST", "/auth/v1/signup?redirect_to=" + encodeURIComponent(location.origin + "/"), { body: withCaptcha({ email: email, password: p1 }), auth: false });
+      resetCaptcha();
+      if (!r.ok) { authError(r.detail || ("Sign-up was refused (" + r.status + ").")); return; }
+      $("suPw1").value = "";
+      $("suPw2").value = "";
+      updatePwCount("suPw1", "suPwCount");
+      if (r.data && r.data.access_token) { await finishSignIn(r.data); return; }
+      $("signUpSent").textContent = "Almost done. We sent a confirmation link to " + email + ". Open it in this browser to finish creating your account.";
+      $("signUpSent").hidden = false;
+    } catch (e) {
+      authError(NETWORK_HINT);
+    } finally { this.disabled = false; }
+  });
+
+  // Google sign-in. Supabase returns to this page with the session in the URL
+  // fragment, which handleEmailLanding already turns into a signed-in session
+  // (including the two-step check).
+  $("googleBtn").addEventListener("click", function () {
+    location.href = URL_BASE + "/auth/v1/authorize?provider=google&redirect_to=" + encodeURIComponent(location.origin + "/");
+  });
+
+  // Two-step verification setup, matching the mobile Security screen.
+  var pendingEnroll = null;
+  var disarmTimer = null;
+  function mfaMsg(t, isErr) {
+    var el = $("mfaMsg");
+    el.textContent = t || "";
+    el.hidden = !t;
+    el.className = isErr ? "err" : "note";
+  }
+  function clearEnrollUi() {
+    $("mfaEnroll").hidden = true;
+    $("mfaQr").removeAttribute("src");
+    $("mfaSecret").textContent = "";
+    $("mfaNewCode").value = "";
+  }
+  async function loadMfa() {
+    $("mfaOn").hidden = true;
+    $("mfaOff").hidden = true;
+    var u = await call("GET", "/auth/v1/user");
+    if (!u.ok) { mfaMsg(u.detail || "Could not load your security settings.", true); return; }
+    var f = verifiedTotp(u.data);
+    if (f) { $("mfaOn").dataset.factor = f.id; $("mfaOn").hidden = false; }
+    else { $("mfaOff").hidden = false; }
+  }
+  $("mfaDetails").addEventListener("toggle", function () {
+    if (this.open) { mfaMsg(""); loadMfa(); }
+  });
+  $("mfaStart").addEventListener("click", async function () {
+    mfaMsg("");
+    this.disabled = true;
+    try {
+      // Clear any half-finished setup first.
+      var u = await call("GET", "/auth/v1/user");
+      var fs = (u.ok && u.data && u.data.factors) || [];
+      for (var i = 0; i < fs.length; i++) {
+        if (fs[i].factor_type === "totp" && fs[i].status !== "verified") {
+          await call("DELETE", "/auth/v1/factors/" + encodeURIComponent(fs[i].id));
+        }
+      }
+      var r = await call("POST", "/auth/v1/factors", { body: { factor_type: "totp", friendly_name: "Authenticator (web " + new Date().toISOString().slice(0, 16) + ")" } });
+      if (!r.ok || !r.data || !r.data.totp) { mfaMsg(r.detail || "Could not start setup.", true); return; }
+      pendingEnroll = r.data.id;
+      $("mfaQr").src = r.data.totp.qr_code;
+      $("mfaSecret").textContent = r.data.totp.secret;
+      $("mfaNewCode").value = "";
+      $("mfaOff").hidden = true;
+      $("mfaEnroll").hidden = false;
+      $("mfaNewCode").focus();
+    } catch (e) {
+      mfaMsg(NETWORK_HINT, true);
+    } finally { this.disabled = false; }
+  });
+  $("mfaConfirm").addEventListener("click", async function () {
+    if (!pendingEnroll) return;
+    var code = $("mfaNewCode").value.replace(/\s+/g, "");
+    if (!/^\d{6}$/.test(code)) { mfaMsg("Enter the 6-digit code from your authenticator app.", true); return; }
+    mfaMsg("");
+    this.disabled = true;
+    try {
+      var base = "/auth/v1/factors/" + encodeURIComponent(pendingEnroll);
+      var c = await call("POST", base + "/challenge", { body: {} });
+      if (!c.ok || !c.data || !c.data.id) { mfaMsg(c.detail || "Could not check the code.", true); return; }
+      var v = await call("POST", base + "/verify", { body: { challenge_id: c.data.id, code: code } });
+      if (!v.ok || !v.data || !v.data.access_token) { mfaMsg(v.detail || "That code was not accepted.", true); return; }
+      pendingEnroll = null;
+      saveSession(normalize(v.data));
+      clearEnrollUi();
+      await loadMfa();
+      mfaMsg("Two-step verification is on. You'll be asked for a code from your authenticator app when you sign in.", false);
+    } catch (e) {
+      mfaMsg(NETWORK_HINT, true);
+    } finally { this.disabled = false; }
+  });
+  $("mfaNewCode").addEventListener("keydown", function (e) { if (e.key === "Enter") $("mfaConfirm").click(); });
+  $("mfaCancel").addEventListener("click", async function () {
+    var id = pendingEnroll;
+    pendingEnroll = null;
+    clearEnrollUi();
+    mfaMsg("");
+    if (id) { try { await call("DELETE", "/auth/v1/factors/" + encodeURIComponent(id)); } catch (e) { /* shown on reload */ } }
+    loadMfa();
+  });
+  $("mfaDisable").addEventListener("click", async function () {
+    var btn = this, id = $("mfaOn").dataset.factor;
+    if (!id) return;
+    if (!btn.dataset.armed) {
+      btn.dataset.armed = "1";
+      btn.textContent = "Tap again to turn off";
+      clearTimeout(disarmTimer);
+      disarmTimer = setTimeout(function () { delete btn.dataset.armed; btn.textContent = "Turn off"; }, 5000);
+      return;
+    }
+    clearTimeout(disarmTimer);
+    delete btn.dataset.armed;
+    btn.textContent = "Turn off";
+    btn.disabled = true;
+    try {
+      var r = await call("DELETE", "/auth/v1/factors/" + encodeURIComponent(id));
+      if (!r.ok) { mfaMsg(r.detail || "Could not turn it off. Sign out, sign back in with your authenticator code, then try again.", true); return; }
+      await loadMfa();
+      mfaMsg("Two-step verification is off.", false);
+    } catch (e) {
+      mfaMsg(NETWORK_HINT, true);
+    } finally { btn.disabled = false; }
   });
 
   // ── boot ───────────────────────────────────────────────────
