@@ -13,7 +13,7 @@
   Content-Security-Policy: frame-ancestors 'none'
 
 /captcha
-  Content-Security-Policy: frame-ancestors https://3bb0917d-1af2-497d-b178-9927964e6af4.newly.dev
+  Content-Security-Policy: frame-ancestors https://3bb0917d-1af2-497d-b178-9927964e6af4.newly.dev https://newly.app
 
 /captcha.html
-  Content-Security-Policy: frame-ancestors https://3bb0917d-1af2-497d-b178-9927964e6af4.newly.dev
+  Content-Security-Policy: frame-ancestors https://3bb0917d-1af2-497d-b178-9927964e6af4.newly.dev https://newly.app
