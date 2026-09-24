@@ -528,6 +528,66 @@
     </div>
   </section>
 
+  <!-- ── expenses ──────────────────────────────────────────── -->
+  <section class="panel" id="expPanel" hidden style="margin-top:16px">
+    <header>
+      <h2>Expenses</h2>
+      <button id="toggleExpAdd" class="tiny" type="button">Add expense</button>
+    </header>
+    <div class="body">
+      <div id="expForm" hidden style="margin-bottom:14px">
+        <div class="grid2">
+          <div>
+            <label class="f" for="eDesc">What was it?</label>
+            <input id="eDesc" maxlength="500" placeholder="Dinner at the hotel">
+          </div>
+          <div class="row">
+            <div>
+              <label class="f" for="eAmt">Amount</label>
+              <input id="eAmt" inputmode="decimal" placeholder="0.00">
+            </div>
+            <div class="shrink" style="width:96px">
+              <label class="f" for="eCcy">Currency</label>
+              <input id="eCcy" maxlength="3" class="mono" style="text-transform:uppercase" placeholder="USD">
+            </div>
+          </div>
+          <div>
+            <label class="f" for="eCat">Category</label>
+            <select id="eCat">
+              <option value="food">Food</option>
+              <option value="accommodation">Lodging</option>
+              <option value="transport">Transport</option>
+              <option value="activity">Activity</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label class="f" for="ePaidBy">Paid by</label>
+            <select id="ePaidBy"></select>
+          </div>
+          <div>
+            <label class="f" for="eDate">Date</label>
+            <input id="eDate" type="date">
+          </div>
+        </div>
+        <p class="note tiny" style="margin:8px 0 0">Split equally between everyone on the trip.</p>
+        <div class="row" style="margin-top:10px">
+          <div class="shrink"><button id="saveExp" type="button">Save expense</button></div>
+          <div class="shrink"><button id="cancelExp" class="ghost" type="button">Cancel</button></div>
+        </div>
+        <p class="err" id="expErr" style="margin:8px 0 0" hidden></p>
+      </div>
+      <p class="note" id="expSummary" style="margin:0 0 10px"></p>
+      <div id="expList"></div>
+      <div id="expBalances" style="margin-top:14px"></div>
+      <div class="row" style="margin-top:12px">
+        <div class="shrink"><button id="calcSettle" class="ghost" type="button" hidden>Settle up</button></div>
+      </div>
+      <div id="settleList" style="margin-top:10px"></div>
+      <p class="note" id="expMsg" style="margin:8px 0 0" hidden></p>
+    </div>
+  </section>
+
   <!-- ── AI tools ──────────────────────────────────────────── -->
   <section class="panel" id="aiPanel" hidden style="margin-top:16px">
     <header>
@@ -1106,6 +1166,7 @@
     $("itinPanel").hidden = true;
     $("aiPanel").hidden = true;
     $("fxPanel").hidden = true;
+    $("expPanel").hidden = true;
     $("workArea").hidden = true;
     selectedTripId = null;
   });
@@ -1130,7 +1191,7 @@
   var selectedTripId = null;
 
   async function loadTrips(selectId) {
-    var r = await call("GET", "/rest/v1/trips?select=id,name,title,destination,start_date,end_date,status,primary_tz&order=start_date.desc");
+    var r = await call("GET", "/rest/v1/trips?select=id,name,title,destination,start_date,end_date,status,primary_tz,base_currency&order=start_date.desc");
     if (!r.ok) { return; }
     trips = r.data || [];
     if (selectId) {
@@ -1143,6 +1204,7 @@
     $("workArea").hidden = trips.length === 0;
     $("itinPanel").hidden = trips.length === 0;
     $("aiPanel").hidden = trips.length === 0;
+    $("expPanel").hidden = trips.length === 0;
     fxInit();
     if (trips.length) onTripChange(); else openTripEditor(true);
   }
@@ -1182,6 +1244,7 @@
     loadDerived();
     loadItinerary();
     fxOnTripChange();
+    loadExpenses();
     $("tripForm").hidden = true;
   }
 
@@ -2374,6 +2437,234 @@
     } catch (e) {
       mfaMsg(NETWORK_HINT, true);
     } finally { btn.disabled = false; }
+  });
+
+  // ADDED 2026-09-24: Expenses (parity with mobile). Every trip has exactly
+  // one expense group that mirrors the trip's members (migration
+  // expenses_follow_trip_members), so the web never creates groups or edits
+  // their roster. Splits are always equal across everyone on the trip, which
+  // is what add_expense does for splitMethod 'equal'. Balances come from
+  // settlement-manager get_balance_summary: expense-tracking get_balances
+  // credits the payer their own share too, so its numbers don't add up.
+  var exp = { groupId: null, tripId: null, members: [], settlements: [] };
+  var expDisarm = null;
+  var EXP_CATS = { food: "Food", accommodation: "Lodging", transport: "Transport", activity: "Activity", other: "Other" };
+  function money(n, c) {
+    try { return new Intl.NumberFormat(undefined, { style: "currency", currency: c || "USD" }).format(Number(n) || 0); }
+    catch (e) { return (Number(n) || 0).toFixed(2) + " " + (c || ""); }
+  }
+  function myRole() {
+    var m = exp.members.filter(function (x) { return x.user_id === (session && session.user_id); })[0];
+    return m ? m.role : null;
+  }
+  function nameOrYou(uid) {
+    if (session && uid === session.user_id) return "You";
+    var m = exp.members.filter(function (x) { return x.user_id === uid; })[0];
+    return m ? (m.display_name || m.email || "Member") : "A former member";
+  }
+  function expMsg(t, isErr) {
+    var el = $("expMsg");
+    el.textContent = t || "";
+    el.hidden = !t;
+    el.className = isErr ? "err" : "note";
+  }
+  function expErr(t) { $("expErr").textContent = t; $("expErr").hidden = false; }
+  function expDetail(r) {
+    var d = r.data || {};
+    return d.message || (typeof d.error === "string" ? d.error : "") || r.detail || ("HTTP " + r.status);
+  }
+  function expFn(name, body) { return call("POST", "/functions/v1/" + name, { body: body }); }
+  function localToday() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  async function loadExpenses() {
+    var t = currentTrip();
+    if (!t || !session) return;
+    var tripId = t.id;
+    exp.tripId = tripId;
+    exp.groupId = null;
+    expMsg("");
+    $("expSummary").textContent = "";
+    $("expBalances").innerHTML = "";
+    $("settleList").innerHTML = "";
+    $("calcSettle").hidden = true;
+    $("expList").innerHTML = '<p class="note">Loading…</p>';
+    var g = await expFn("group-management", { action: "get_groups", tripId: tripId });
+    if (exp.tripId !== tripId) return;
+    var grp = g.ok && g.data && g.data.groups && g.data.groups[0];
+    if (!grp) {
+      $("expList").innerHTML = '<p class="note">Expenses aren\'t available for this trip yet.</p>';
+      if (!g.ok) expMsg(expDetail(g), true);
+      return;
+    }
+    exp.groupId = grp.id;
+    exp.members = (grp.group_members || []).filter(function (m) { return m.status === "active" && m.user_id; });
+    $("ePaidBy").innerHTML = exp.members.map(function (m) {
+      var label = m.user_id === session.user_id ? "You" : (m.display_name || m.email || "Member");
+      return '<option value="' + esc(m.user_id) + '">' + esc(label) + "</option>";
+    }).join("");
+    $("ePaidBy").value = session.user_id;
+    $("eCcy").value = t.base_currency || $("eCcy").value || "USD";
+    var r = await Promise.all([
+      expFn("expense-tracking", { action: "get_expenses", groupId: exp.groupId, tripId: tripId, limit: 200 }),
+      expFn("settlement-manager", { action: "get_balance_summary", groupId: exp.groupId, tripId: tripId }),
+      expFn("settlement-manager", { action: "get_settlements", groupId: exp.groupId, tripId: tripId })
+    ]);
+    if (exp.tripId !== tripId) return;
+    renderExpenses(r[0]);
+    renderBalances(r[1]);
+    renderSettlements(r[2]);
+  }
+
+  function renderExpenses(r) {
+    if (!r.ok) { $("expList").innerHTML = ""; expMsg(expDetail(r), true); return; }
+    var list = (r.data && r.data.expenses) || [];
+    var s = (r.data && r.data.summary) || {};
+    var cur = (s.currencies && s.currencies[0]) || $("eCcy").value || "USD";
+    $("expSummary").textContent = list.length
+      ? list.length + (list.length === 1 ? " expense" : " expenses") + " · " + (s.mixed_currencies ? "more than one currency" : money(s.total, cur) + " total")
+      : "";
+    if (!list.length) {
+      $("expList").innerHTML = '<p class="note">No expenses yet. Everyone on the trip is included, and each expense is split equally.</p>';
+      return;
+    }
+    $("expList").innerHTML = list.map(function (e) {
+      var canDelete = e.paid_by === session.user_id || myRole() === "organizer";
+      return '<div class="res"><div class="top"><span class="name">' + esc(e.description) + '</span><span class="chip acc">' + esc(money(e.amount, e.currency)) + "</span></div>"
+        + "<dl><div><dt>Paid by</dt><dd>" + esc(nameOrYou(e.paid_by)) + "</dd></div>"
+        + "<div><dt>Date</dt><dd>" + esc(new Date(e.paid_at).toLocaleDateString()) + "</dd></div>"
+        + "<div><dt>Category</dt><dd>" + esc(EXP_CATS[e.category] || e.category) + "</dd></div>"
+        + "<div><dt>Split</dt><dd>" + esc(e.split_method === "equal" ? "Equally" : e.split_method) + "</dd></div></dl>"
+        + (canDelete ? '<div class="acts"><button class="tiny danger" type="button" data-del-exp="' + esc(e.id) + '">Delete</button></div>' : "")
+        + "</div>";
+    }).join("");
+  }
+
+  function renderBalances(r) {
+    if (!r.ok || !r.data) { $("expBalances").innerHTML = ""; return; }
+    var b = r.data.balances || [];
+    var c = (r.data.currencies && r.data.currencies[0]) || $("eCcy").value || "USD";
+    if (r.data.mixed_currencies) {
+      $("expBalances").innerHTML = '<p class="note">Balances can\'t be combined across currencies yet. Keep one currency per trip for now.</p>';
+      return;
+    }
+    if (!b.length || !(r.data.currencies || []).length) { $("expBalances").innerHTML = ""; return; }
+    $("expBalances").innerHTML = '<label class="f">Balances</label><div class="derived">' + b.map(function (x) {
+      var n = Number(x.net) || 0;
+      var even = Math.abs(n) < 0.005;
+      var txt = even ? "Even" : (n > 0 ? "Gets back " + money(n, c) : "Owes " + money(-n, c));
+      return '<div class="d"><span class="chip ' + (even ? "mute" : n > 0 ? "ok" : "warn") + '">' + esc(txt) + '</span><div class="txt"><strong>'
+        + esc(x.userId === session.user_id ? "You" : x.displayName) + "</strong><span>Paid " + esc(money(x.owed, c)) + " · share " + esc(money(x.owes, c)) + "</span></div></div>";
+    }).join("") + "</div>";
+  }
+
+  function renderSettlements(r) {
+    exp.settlements = (r.ok && r.data && r.data.settlements) || [];
+    var anySettled = exp.settlements.some(function (s) { return s.status === "settled"; });
+    var anyPending = exp.settlements.some(function (s) { return s.status === "pending"; });
+    // Recalculating after anyone has paid would ask them to pay again
+    // (settlement-manager recomputes from every expense), so it's offered only
+    // while nothing has been marked paid.
+    $("calcSettle").hidden = anySettled || exp.members.length < 2;
+    $("calcSettle").textContent = anyPending ? "Recalculate" : "Settle up";
+    if (!exp.settlements.length) { $("settleList").innerHTML = ""; return; }
+    $("settleList").innerHTML = '<label class="f">Who pays whom</label>' + exp.settlements.map(function (s) {
+      var canMark = s.status !== "settled" && (s.to_user === session.user_id || myRole() === "organizer");
+      return '<div class="it" style="grid-template-columns:minmax(0,1fr) auto"><div class="what"><b>' + esc(nameOrYou(s.from_user)) + " → " + esc(nameOrYou(s.to_user))
+        + "</b><span>" + esc(money(s.amount, s.currency)) + '</span></div><div class="acts"><span class="chip '
+        + (s.status === "settled" ? "ok" : s.status === "disputed" ? "bad" : "warn") + '">' + esc(s.status === "settled" ? "paid" : s.status) + "</span>"
+        + (canMark ? '<button class="tiny ghost" type="button" data-mark="' + esc(s.id) + '">Mark paid</button>' : "") + "</div></div>";
+    }).join("") + '<p class="note tiny" style="margin:8px 0 0">After a settle-up is calculated, existing expenses can no longer be edited or deleted.</p>';
+  }
+
+  $("toggleExpAdd").addEventListener("click", function () {
+    var f = $("expForm");
+    f.hidden = !f.hidden;
+    $("expErr").hidden = true;
+    if (!f.hidden) {
+      if (!$("eDate").value) $("eDate").value = localToday();
+      $("eDesc").focus();
+    }
+  });
+  $("cancelExp").addEventListener("click", function () { $("expForm").hidden = true; $("expErr").hidden = true; });
+  $("saveExp").addEventListener("click", async function () {
+    var desc = $("eDesc").value.trim();
+    var amt = Math.round(parseFloat(String($("eAmt").value).replace(/,/g, "")) * 100) / 100;
+    var ccy = $("eCcy").value.trim().toUpperCase();
+    $("expErr").hidden = true;
+    if (!desc) { expErr("Describe the expense."); return; }
+    if (!(amt > 0) || amt > 100000000) { expErr("Enter an amount greater than zero."); return; }
+    if (!/^[A-Z]{3}$/.test(ccy)) { expErr("Use a 3-letter currency code, like USD."); return; }
+    if (!exp.groupId) { expErr("Expenses aren't available for this trip yet."); return; }
+    var d = $("eDate").value;
+    var paidAt = d ? new Date(d + "T12:00:00").toISOString() : new Date().toISOString();
+    this.disabled = true;
+    try {
+      var r = await expFn("expense-tracking", {
+        action: "add_expense", groupId: exp.groupId, tripId: exp.tripId, description: desc, amount: amt,
+        currency: ccy, category: $("eCat").value, paidBy: $("ePaidBy").value || session.user_id, paidAt: paidAt, splitMethod: "equal"
+      });
+      if (!r.ok) { expErr(expDetail(r)); return; }
+      $("eDesc").value = "";
+      $("eAmt").value = "";
+      $("expForm").hidden = true;
+      await loadExpenses();
+    } catch (e) {
+      expErr(NETWORK_HINT);
+    } finally { this.disabled = false; }
+  });
+  $("expList").addEventListener("click", async function (e) {
+    var btn = e.target.closest("[data-del-exp]");
+    if (!btn) return;
+    if (!btn.dataset.armed) {
+      btn.dataset.armed = "1";
+      btn.textContent = "Tap again to delete";
+      clearTimeout(expDisarm);
+      expDisarm = setTimeout(function () { delete btn.dataset.armed; btn.textContent = "Delete"; }, 5000);
+      return;
+    }
+    clearTimeout(expDisarm);
+    btn.disabled = true;
+    var r = await expFn("expense-tracking", { action: "delete_expense", expenseId: btn.getAttribute("data-del-exp") });
+    if (!r.ok) {
+      btn.disabled = false;
+      delete btn.dataset.armed;
+      btn.textContent = "Delete";
+      expMsg(r.data && r.data.error === "SETTLEMENT_EXISTS"
+        ? "This trip already has a settle-up, so expenses can't be deleted."
+        : expDetail(r), true);
+      return;
+    }
+    loadExpenses();
+  });
+  $("calcSettle").addEventListener("click", async function () {
+    if (!exp.groupId) return;
+    var force = exp.settlements.some(function (s) { return s.status === "pending"; });
+    this.disabled = true;
+    expMsg("");
+    try {
+      var r = await expFn("settlement-manager", { action: "calculate_settlements", groupId: exp.groupId, tripId: exp.tripId, force: force || undefined });
+      if (!r.ok) {
+        var code = r.data && r.data.error;
+        expMsg(code === "MIXED_CURRENCIES" ? "Settle-up needs every expense in the same currency." : expDetail(r), true);
+        return;
+      }
+      var n = (r.data && r.data.settlements && r.data.settlements.length) || 0;
+      await loadExpenses();
+      expMsg(n ? "Settle-up calculated: " + n + (n === 1 ? " payment" : " payments") + " below." : "Everyone is even. Nothing to pay.", false);
+    } catch (e) {
+      expMsg(NETWORK_HINT, true);
+    } finally { this.disabled = false; }
+  });
+  $("settleList").addEventListener("click", async function (e) {
+    var btn = e.target.closest("[data-mark]");
+    if (!btn) return;
+    btn.disabled = true;
+    var r = await expFn("settlement-manager", { action: "mark_settled", settlementId: btn.getAttribute("data-mark") });
+    if (!r.ok) { btn.disabled = false; expMsg(expDetail(r), true); return; }
+    loadExpenses();
   });
 
   // ── boot ───────────────────────────────────────────────────
