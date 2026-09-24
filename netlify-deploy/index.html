@@ -257,6 +257,29 @@
             </div>
             <div class="shrink"><button id="signInPassword" type="button">Sign in</button></div>
           </div>
+          <p class="note tiny" style="margin:8px 0 0"><a href="#" id="forgotLink">Forgot password?</a></p>
+        </div>
+
+        <div id="paneForgot" hidden>
+          <p class="note" style="margin:0 0 8px">Enter the email on your account above and we'll send a link to choose a new password.</p>
+          <div class="row">
+            <div class="shrink"><button id="sendReset" type="button">Send reset link</button></div>
+            <div class="shrink"><button id="backFromForgot" class="ghost" type="button">Back to sign in</button></div>
+          </div>
+          <p class="note" id="resetSent" style="margin:10px 0 0" hidden></p>
+        </div>
+
+        <div id="paneNewPw" hidden>
+          <p class="note" style="margin:0 0 8px"><strong>Choose a new password</strong> for <span id="recoverEmail" class="mono"></span>. Use at least 15 characters; passwords found in known data breaches are rejected.</p>
+          <label class="f" for="newPw1">New password</label>
+          <input id="newPw1" type="password" autocomplete="new-password" placeholder="At least 15 characters">
+          <p class="note tiny" id="newPwCount" style="margin:4px 0 8px">0/15</p>
+          <label class="f" for="newPw2">Confirm new password</label>
+          <input id="newPw2" type="password" autocomplete="new-password">
+          <div class="row" style="margin-top:10px">
+            <div class="shrink"><button id="saveNewPw" type="button">Save new password</button></div>
+            <div class="shrink"><button id="cancelNewPw" class="ghost" type="button">Cancel</button></div>
+          </div>
         </div>
 
         <div id="paneCode" hidden>
@@ -308,6 +331,26 @@
           <div class="shrink"><button id="signOut" class="ghost" type="button">Sign out</button></div>
         </div>
         <p class="note" id="weakPwNote" style="margin:10px 0 0" hidden></p>
+        <details id="pwDetails" style="margin-top:12px">
+          <summary class="note" style="cursor:pointer">Change password</summary>
+          <div style="margin-top:8px">
+            <label class="f" for="curPw">Current password</label>
+            <input id="curPw" type="password" autocomplete="current-password">
+            <label class="f" for="chPw1" style="margin-top:8px">New password</label>
+            <input id="chPw1" type="password" autocomplete="new-password" placeholder="At least 15 characters">
+            <p class="note tiny" id="chPwCount" style="margin:4px 0 8px">0/15</p>
+            <label class="f" for="chPw2">Confirm new password</label>
+            <input id="chPw2" type="password" autocomplete="new-password">
+            <div id="chNonceRow" hidden style="margin-top:8px">
+              <label class="f" for="chNonce">Verification code from the email</label>
+              <input id="chNonce" inputmode="numeric" autocomplete="one-time-code" maxlength="8" class="mono">
+            </div>
+            <div class="row" style="margin-top:10px">
+              <div class="shrink"><button id="savePwChange" type="button">Update password</button></div>
+            </div>
+            <p class="note" id="chPwMsg" style="margin:8px 0 0" hidden></p>
+          </div>
+        </details>
       </div>
     </div>
   </section>
@@ -973,6 +1016,7 @@
   $("signOut").addEventListener("click", function () {
     saveSession(null);
     noteWeakPassword(null);
+    if ($("pwDetails")) $("pwDetails").open = false;
     trips = []; reservations = [];
     renderAuth();
     $("tripPanel").hidden = true;
@@ -1855,10 +1899,208 @@
     setTimeout(loadDerived, 1500);
   });
 
+  // ADDED 2026-09-24: forgot password, email-link landing, change password.
+  // Supabase email links (password reset, magic link, signup confirmation)
+  // redirect here with the session in the URL fragment. Before this change
+  // the page ignored the fragment and showed whatever session was already
+  // stored, so a reset link never reached a "new password" screen and a
+  // magic link did not actually sign anyone in.
+  var recovery = null;
+  function readAuthRedirect() {
+    var p = new URLSearchParams(location.hash && location.hash.length > 1 ? location.hash.slice(1) : "");
+    var q = new URLSearchParams(location.search && location.search.length > 1 ? location.search.slice(1) : "");
+    var err = p.get("error_description") || q.get("error_description");
+    if (!p.get("access_token") && !err) return null;
+    try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ }
+    if (err) return { error: err };
+    return {
+      access_token: p.get("access_token"),
+      refresh_token: p.get("refresh_token"),
+      expires_in: Number(p.get("expires_in")) || 3600,
+      expires_at: Number(p.get("expires_at")) || 0,
+      type: p.get("type") || ""
+    };
+  }
+  function showBanner(text) {
+    var b = $("netBanner");
+    if (!b) return;
+    b.textContent = text;
+    b.hidden = false;
+  }
+  function setSignInChrome(on) {
+    var tabs = document.querySelector("#signedOut .tabs");
+    if (tabs) tabs.hidden = !on;
+    var cb = $("captchaBox");
+    if (cb) cb.hidden = !on;
+  }
+  function enterForgot() {
+    setSignInChrome(false);
+    var cb = $("captchaBox");
+    if (cb) cb.hidden = false;
+    $("panePassword").hidden = true;
+    $("paneCode").hidden = true;
+    $("paneForgot").hidden = false;
+    $("resetSent").hidden = true;
+    authError("");
+    $("email").focus();
+  }
+  function leaveForgot() {
+    $("paneForgot").hidden = true;
+    setSignInChrome(true);
+    showTab("password");
+  }
+  function updatePwCount(inputId, countId) {
+    var n = $(inputId).value.length;
+    $(countId).textContent = n + "/15" + (n >= 15 ? " \u2713" : "");
+  }
+  function showNewPw(email) {
+    setSignInChrome(false);
+    $("panePassword").hidden = true;
+    $("paneCode").hidden = true;
+    $("paneForgot").hidden = true;
+    $("email").parentElement.hidden = true;
+    $("recoverEmail").textContent = email || "your account";
+    $("newPw1").value = "";
+    $("newPw2").value = "";
+    updatePwCount("newPw1", "newPwCount");
+    $("paneNewPw").hidden = false;
+    $("newPw1").focus();
+  }
+  function hideNewPw() {
+    $("paneNewPw").hidden = true;
+    $("email").parentElement.hidden = false;
+    setSignInChrome(true);
+    showTab("password");
+  }
+  async function handleEmailLanding(d) {
+    var who = null;
+    try {
+      var u = await call("GET", "/auth/v1/user", { auth: false, headers: { Authorization: "Bearer " + d.access_token } });
+      if (u.ok) who = u.data;
+    } catch (e) { /* network hint shown elsewhere */ }
+    d.user = who;
+    // An email link always belongs to the account it was sent to, so it
+    // replaces any other session stored in this browser.
+    if (session && session.access_token) $("signOut").click();
+    if (d.type === "recovery") {
+      recovery = d;
+      renderAuth();
+      showNewPw(who && who.email);
+      return;
+    }
+    await finishSignIn(d);
+  }
+  $("forgotLink").addEventListener("click", function (e) { e.preventDefault(); enterForgot(); });
+  $("backFromForgot").addEventListener("click", leaveForgot);
+  $("sendReset").addEventListener("click", async function () {
+    var email = $("email").value.trim().toLowerCase();
+    if (!email) { authError("Enter the email address on the account."); return; }
+    if (captchaWidget !== null && !captchaToken) { authError("Please wait for the security check above to finish, then try again."); return; }
+    authError("");
+    this.disabled = true;
+    try {
+      var r = await call("POST", "/auth/v1/recover?redirect_to=" + encodeURIComponent(location.origin + "/"), { body: withCaptcha({ email: email }), auth: false });
+      resetCaptcha();
+      if (!r.ok) { authError(r.detail || ("That request was refused (" + r.status + ").")); return; }
+      $("resetSent").textContent = "If an account exists for " + email + ", a reset link is on its way. Open it in this browser; it expires in 1 hour.";
+      $("resetSent").hidden = false;
+    } catch (e) {
+      authError(NETWORK_HINT);
+    } finally { this.disabled = false; }
+  });
+  $("newPw1").addEventListener("input", function () { updatePwCount("newPw1", "newPwCount"); });
+  $("saveNewPw").addEventListener("click", async function () {
+    if (!recovery) return;
+    var p1 = $("newPw1").value, p2 = $("newPw2").value;
+    if (p1.length < 15) { authError("Use at least 15 characters."); return; }
+    if (p1 !== p2) { authError("The two passwords don't match."); return; }
+    authError("");
+    this.disabled = true;
+    try {
+      var r = await call("PUT", "/auth/v1/user", { body: { password: p1 }, auth: false, headers: { Authorization: "Bearer " + recovery.access_token } });
+      if (!r.ok) { authError(r.detail || "The new password wasn't accepted."); return; }
+      var d = recovery;
+      recovery = null;
+      $("newPw1").value = "";
+      $("newPw2").value = "";
+      hideNewPw();
+      await finishSignIn(d);
+      var n = $("weakPwNote");
+      if (n) { n.textContent = "Your password was changed."; n.hidden = false; }
+    } catch (e) {
+      authError(NETWORK_HINT);
+    } finally { this.disabled = false; }
+  });
+  $("cancelNewPw").addEventListener("click", function () {
+    var t = recovery && recovery.access_token;
+    recovery = null;
+    $("newPw1").value = "";
+    $("newPw2").value = "";
+    hideNewPw();
+    authError("");
+    if (t) fetch(URL_BASE + "/auth/v1/logout", { method: "POST", headers: { apikey: ANON, Authorization: "Bearer " + t } }).catch(function () {});
+  });
+  function chMsg(t, isErr) {
+    var el = $("chPwMsg");
+    el.textContent = t || "";
+    el.hidden = !t;
+    el.className = isErr ? "err" : "note";
+  }
+  $("chPw1").addEventListener("input", function () { updatePwCount("chPw1", "chPwCount"); });
+  $("savePwChange").addEventListener("click", async function () {
+    var cur = $("curPw").value, p1 = $("chPw1").value, p2 = $("chPw2").value, nonce = $("chNonce").value.trim();
+    if (!cur) { chMsg("Enter your current password.", true); return; }
+    if (p1.length < 15) { chMsg("Use at least 15 characters.", true); return; }
+    if (p1 !== p2) { chMsg("The two new passwords don't match.", true); return; }
+    if (!$("chNonceRow").hidden && !nonce) { chMsg("Enter the verification code we emailed you.", true); return; }
+    chMsg("");
+    this.disabled = true;
+    try {
+      var body = { password: p1, current_password: cur };
+      if (nonce) body.nonce = nonce;
+      var r = await call("PUT", "/auth/v1/user", { body: body });
+      if (!r.ok) {
+        if (/reauth|nonce/i.test(r.detail || "") && $("chNonceRow").hidden) {
+          var ra = await call("GET", "/auth/v1/reauthenticate");
+          if (ra.ok) {
+            $("chNonceRow").hidden = false;
+            chMsg("For security, we emailed you a verification code. Enter it above, then press Update password again.", false);
+            $("chNonce").focus();
+          } else {
+            chMsg(ra.detail || "Could not send the verification code.", true);
+          }
+          return;
+        }
+        chMsg(r.detail || "The password wasn't changed.", true);
+        return;
+      }
+      $("curPw").value = "";
+      $("chPw1").value = "";
+      $("chPw2").value = "";
+      $("chNonce").value = "";
+      $("chNonceRow").hidden = true;
+      updatePwCount("chPw1", "chPwCount");
+      noteWeakPassword(null);
+      chMsg("Your password was changed.", false);
+    } catch (e) {
+      chMsg(NETWORK_HINT, true);
+    } finally { this.disabled = false; }
+  });
+
   // ── boot ───────────────────────────────────────────────────
   session = loadSession();
-  renderAuth();
-  if (session && session.access_token) loadTrips();
+  var landing = readAuthRedirect();
+  if (landing && landing.error) {
+    renderAuth();
+    if (session && session.access_token) loadTrips();
+    showBanner("That email link didn't work: " + landing.error + ". Request a new one.");
+  } else if (landing) {
+    renderAuth();
+    handleEmailLanding(landing);
+  } else {
+    renderAuth();
+    if (session && session.access_token) loadTrips();
+  }
 
   // Probe the backend immediately on load, before anyone clicks anything.
   (function probeNetwork() {
