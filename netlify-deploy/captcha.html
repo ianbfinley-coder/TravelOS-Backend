@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TravelOS security check</title>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; font-family: system-ui, -apple-system, sans-serif; }
+  #box { display: flex; justify-content: center; padding: 8px 0; }
+</style>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+</head>
+<body>
+<div id="box"></div>
+<script>
+// TravelOS sign-in security check (Cloudflare Turnstile), 2026-09-24.
+// Loaded by the mobile app: in a WebView on iOS/Android, in an iframe on web.
+// Sends the single-use token to the app; the app passes it to Supabase Auth as
+// options.captchaToken. The app remounts this page to get a fresh token.
+(function () {
+  var SITE_KEY = "0x4AAAAAAFCIVZSahCpQkM1C";
+  var ALLOWED_PARENTS = ["https://3bb0917d-1af2-497d-b178-9927964e6af4.newly.dev"];
+  var q = new URLSearchParams(location.search);
+  var theme = q.get("theme") === "dark" ? "dark" : (q.get("theme") === "light" ? "light" : "auto");
+  var widget = null;
+  function send(msg) {
+    if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+      window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+      return;
+    }
+    if (window.parent && window.parent !== window) {
+      for (var i = 0; i < ALLOWED_PARENTS.length; i++) window.parent.postMessage(msg, ALLOWED_PARENTS[i]);
+    }
+  }
+  function mount(n) {
+    n = n || 0;
+    if (!window.turnstile || !window.turnstile.render) {
+      if (n < 200) setTimeout(function () { mount(n + 1); }, 100);
+      else send({ type: "turnstile-error", code: "script-load" });
+      return;
+    }
+    widget = window.turnstile.render("#box", {
+      sitekey: SITE_KEY,
+      theme: theme,
+      callback: function (t) { send({ type: "turnstile-token", token: t }); },
+      "expired-callback": function () { send({ type: "turnstile-expired" }); },
+      "error-callback": function (code) { send({ type: "turnstile-error", code: String(code || "") }); }
+    });
+  }
+  window.addEventListener("message", function (e) {
+    if (ALLOWED_PARENTS.indexOf(e.origin) === -1) return;
+    var d = e.data;
+    if (d && d.type === "turnstile-reset" && widget !== null && window.turnstile) window.turnstile.reset(widget);
+  });
+  mount();
+})();
+</script>
+</body>
+</html>

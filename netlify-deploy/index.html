@@ -1,4 +1,5 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style><script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+</head><body>
 <title>TravelOS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -280,6 +281,8 @@
             <p class="note" id="sentTo" style="margin:10px 0 0"></p>
           </div>
         </div>
+
+        <div id="captchaBox" style="margin-top:12px"></div>
 
         <div id="paneMfa" hidden>
           <p class="note tiny" style="margin:0 0 8px">Two-step verification is on for this account. Enter the 6-digit code from your authenticator app.</p>
@@ -761,9 +764,11 @@
     authError("");
     this.disabled = true;
     try {
+      if (captchaWidget !== null && !captchaToken) { authError("Please wait for the security check above to finish, then try again."); return; }
       var r = await call("POST", "/auth/v1/token?grant_type=password", {
-        body: { email: email, password: password }, auth: false
+        body: withCaptcha({ email: email, password: password }), auth: false
       });
+      resetCaptcha();
       if (!r.ok || !r.data || !r.data.access_token) {
         authError(r.detail || "That email and password were not accepted.");
       } else {
@@ -774,6 +779,41 @@
       authError(NETWORK_HINT);
     } finally { this.disabled = false; }
   });
+
+  // ADDED 2026-09-24: Cloudflare Turnstile CAPTCHA on sign-in. Once CAPTCHA
+  // protection is enabled in Supabase Auth, /token?grant_type=password and
+  // /otp require gotrue_meta_security.captcha_token. Tokens are single-use,
+  // so the widget is reset after every attempt. If the Turnstile script
+  // never loads, requests go out without a token and the server decides.
+  var TURNSTILE_SITE_KEY = "0x4AAAAAAFCIVZSahCpQkM1C";
+  var captchaToken = "";
+  var captchaWidget = null;
+  function mountCaptcha(tries) {
+    tries = tries || 0;
+    if (captchaWidget !== null) return;
+    if (!window.turnstile || !window.turnstile.render) {
+      if (tries < 100) setTimeout(function () { mountCaptcha(tries + 1); }, 150);
+      return;
+    }
+    captchaWidget = window.turnstile.render("#captchaBox", {
+      sitekey: TURNSTILE_SITE_KEY,
+      theme: "auto",
+      callback: function (t) { captchaToken = t; },
+      "expired-callback": function () { captchaToken = ""; },
+      "error-callback": function () { captchaToken = ""; }
+    });
+  }
+  function resetCaptcha() {
+    captchaToken = "";
+    if (captchaWidget !== null && window.turnstile) {
+      try { window.turnstile.reset(captchaWidget); } catch (e) { /* widget gone */ }
+    }
+  }
+  function withCaptcha(body) {
+    if (captchaToken) body.gotrue_meta_security = { captcha_token: captchaToken };
+    return body;
+  }
+  mountCaptcha();
 
   // ADDED 2026-09-24 (account protection): if the account has a verified
   // authenticator-app (TOTP) factor, the password/email-code sign-in only
@@ -791,6 +831,8 @@
   }
   function showMfa(on) {
     $("paneMfa").hidden = !on;
+    var cb = $("captchaBox");
+    if (cb) cb.hidden = on;
     var tabs = document.querySelector("#signedOut .tabs");
     if (tabs) tabs.hidden = on;
     if (on) { $("panePassword").hidden = true; $("paneCode").hidden = true; }
@@ -865,7 +907,9 @@
     this.disabled = true;
     this.textContent = "Sending…";
     try {
-      var r = await call("POST", "/auth/v1/otp", { body: { email: email, create_user: false }, auth: false });
+      if (captchaWidget !== null && !captchaToken) { authError("Please wait for the security check above to finish, then try again."); return; }
+      var r = await call("POST", "/auth/v1/otp", { body: withCaptcha({ email: email, create_user: false }), auth: false });
+      resetCaptcha();
       if (!r.ok) {
         authError(r.detail || ("That request was refused (" + r.status + ")."));
       } else {
