@@ -271,13 +271,25 @@
           <div id="stepCode" hidden>
             <div class="row">
               <div>
-                <label class="f" for="code">Six-digit code</label>
+                <label class="f" for="code">Code from the email</label>
                 <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="000000" class="mono">
               </div>
               <div class="shrink"><button id="verifyCode" type="button">Sign in</button></div>
               <div class="shrink"><button id="backToEmail" class="ghost" type="button">Back</button></div>
             </div>
             <p class="note" id="sentTo" style="margin:10px 0 0"></p>
+          </div>
+        </div>
+
+        <div id="paneMfa" hidden>
+          <p class="note tiny" style="margin:0 0 8px">Two-step verification is on for this account. Enter the 6-digit code from your authenticator app.</p>
+          <div class="row">
+            <div>
+              <label class="f" for="mfaCode">Authenticator code</label>
+              <input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" class="mono">
+            </div>
+            <div class="shrink"><button id="verifyMfa" type="button">Verify</button></div>
+            <div class="shrink"><button id="cancelMfa" class="ghost" type="button">Cancel</button></div>
           </div>
         </div>
 
@@ -292,6 +304,7 @@
           </div>
           <div class="shrink"><button id="signOut" class="ghost" type="button">Sign out</button></div>
         </div>
+        <p class="note" id="weakPwNote" style="margin:10px 0 0" hidden></p>
       </div>
     </div>
   </section>
@@ -754,14 +767,93 @@
       if (!r.ok || !r.data || !r.data.access_token) {
         authError(r.detail || "That email and password were not accepted.");
       } else {
-        saveSession(normalize(r.data));
         $("password").value = "";
-        renderAuth();
-        loadTrips();
+        await finishSignIn(r.data);
       }
     } catch (e) {
       authError(NETWORK_HINT);
     } finally { this.disabled = false; }
+  });
+
+  // ADDED 2026-09-24 (account protection): if the account has a verified
+  // authenticator-app (TOTP) factor, the password/email-code sign-in only
+  // yields an aal1 session. That session is held in memory, never saved,
+  // until the TOTP code is verified and GoTrue returns an aal2 session.
+  // Also surfaces GoTrue's weak_password flag (min length 15 + leaked-
+  // password check) so users know to set a new password.
+  var pendingMfa = null;
+  function verifiedTotp(user) {
+    var f = (user && Array.isArray(user.factors)) ? user.factors : [];
+    for (var i = 0; i < f.length; i++) {
+      if (f[i] && f[i].factor_type === "totp" && f[i].status === "verified") return f[i];
+    }
+    return null;
+  }
+  function showMfa(on) {
+    $("paneMfa").hidden = !on;
+    var tabs = document.querySelector("#signedOut .tabs");
+    if (tabs) tabs.hidden = on;
+    if (on) { $("panePassword").hidden = true; $("paneCode").hidden = true; }
+    else showTab("password");
+  }
+  function noteWeakPassword(d) {
+    var el = $("weakPwNote");
+    if (!el) return;
+    if (d && d.weak_password) {
+      el.textContent = "Your password no longer meets TravelOS's security rules (at least 15 characters, and not found in known data breaches). Please set a new one in the TravelOS app under Settings \u2192 Security.";
+      el.hidden = false;
+    } else {
+      el.textContent = "";
+      el.hidden = true;
+    }
+  }
+  async function finishSignIn(d) {
+    var factor = verifiedTotp(d && d.user);
+    if (factor) {
+      pendingMfa = { factorId: factor.id, token: d.access_token, weak: d.weak_password || null };
+      showMfa(true);
+      $("mfaCode").value = "";
+      $("mfaCode").focus();
+      return;
+    }
+    saveSession(normalize(d));
+    noteWeakPassword(d);
+    renderAuth();
+    loadTrips();
+  }
+  $("verifyMfa").addEventListener("click", async function () {
+    if (!pendingMfa) return;
+    var code = $("mfaCode").value.replace(/\s+/g, "");
+    if (!/^\d{6}$/.test(code)) { authError("Enter the 6-digit code from your authenticator app."); return; }
+    authError("");
+    this.disabled = true;
+    try {
+      var h = { Authorization: "Bearer " + pendingMfa.token };
+      var base = "/auth/v1/factors/" + encodeURIComponent(pendingMfa.factorId);
+      var c = await call("POST", base + "/challenge", { body: {}, auth: false, headers: h });
+      if (!c.ok || !c.data || !c.data.id) { authError(c.detail || "Could not start verification. Please sign in again."); return; }
+      var v = await call("POST", base + "/verify", { body: { challenge_id: c.data.id, code: code }, auth: false, headers: h });
+      if (!v.ok || !v.data || !v.data.access_token) { authError(v.detail || "That code was not accepted."); return; }
+      var weak = pendingMfa.weak;
+      pendingMfa = null;
+      $("mfaCode").value = "";
+      showMfa(false);
+      saveSession(normalize(v.data));
+      noteWeakPassword({ weak_password: weak });
+      renderAuth();
+      loadTrips();
+    } catch (e) {
+      authError(NETWORK_HINT);
+    } finally { this.disabled = false; }
+  });
+  $("mfaCode").addEventListener("keydown", function (e) { if (e.key === "Enter") $("verifyMfa").click(); });
+  $("cancelMfa").addEventListener("click", function () {
+    var t = pendingMfa && pendingMfa.token;
+    pendingMfa = null;
+    $("mfaCode").value = "";
+    showMfa(false);
+    authError("");
+    if (t) fetch(URL_BASE + "/auth/v1/logout", { method: "POST", headers: { apikey: ANON, Authorization: "Bearer " + t } }).catch(function () {});
   });
 
   $("password").addEventListener("keydown", function (e) { if (e.key === "Enter") $("signInPassword").click(); });
@@ -807,12 +899,10 @@
       if (!r.ok || !r.data || !r.data.access_token) {
         authError(r.detail || "That code was not accepted.");
       } else {
-        saveSession(normalize(r.data));
         $("code").value = "";
         $("stepCode").hidden = true;
         $("stepEmail").hidden = false;
-        renderAuth();
-        loadTrips();
+        await finishSignIn(r.data);
       }
     } catch (e) {
       authError(NETWORK_HINT);
@@ -827,6 +917,7 @@
 
   $("signOut").addEventListener("click", function () {
     saveSession(null);
+    noteWeakPassword(null);
     trips = []; reservations = [];
     renderAuth();
     $("tripPanel").hidden = true;
