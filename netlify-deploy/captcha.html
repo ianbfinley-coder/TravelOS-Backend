@@ -5,8 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TravelOS security check</title>
 <style>
-  html, body { margin: 0; padding: 0; background: transparent; font-family: system-ui, -apple-system, sans-serif; }
-  #box { display: flex; justify-content: center; padding: 8px 0; }
+  html, body { margin: 0; padding: 0; overflow: hidden; background: transparent; font-family: system-ui, -apple-system, sans-serif; }
+  #box { display: flex; justify-content: center; padding: 0; }
+  /* This page is only ever shown inside the app's 80px frame; Netlify's
+     injected site badge would sit on top of the widget there. */
+  #nl-badge-frame { display: none !important; }
 </style>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 </head>
