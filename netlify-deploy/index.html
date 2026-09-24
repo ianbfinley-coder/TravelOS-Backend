@@ -739,6 +739,12 @@
   }
 
   function authError(msg) {
+    if (msg && /captcha/i.test(msg)) {
+      msg = (captchaWidget === null)
+        ? "The security check couldn't load, so sign-in was refused. Reload the page; if a blocker is on, allow challenges.cloudflare.com."
+        : "The security check didn't go through. Please complete it again.";
+      resetCaptcha();
+    }
     var el = $("authErr");
     el.textContent = msg || "";
     el.hidden = !msg;
@@ -792,7 +798,12 @@
     tries = tries || 0;
     if (captchaWidget !== null) return;
     if (!window.turnstile || !window.turnstile.render) {
-      if (tries < 100) setTimeout(function () { mountCaptcha(tries + 1); }, 150);
+      if (tries < 100) { setTimeout(function () { mountCaptcha(tries + 1); }, 150); return; }
+      var box = $("captchaBox");
+      if (box) {
+        box.className = "note";
+        box.textContent = "The security check couldn't load. Reload the page. If you use an ad, tracker or privacy blocker, allow challenges.cloudflare.com for this site.";
+      }
       return;
     }
     captchaWidget = window.turnstile.render("#captchaBox", {
