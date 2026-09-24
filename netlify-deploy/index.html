@@ -528,6 +528,43 @@
     </div>
   </section>
 
+  <!-- ── people ────────────────────────────────────────────── -->
+  <section class="panel" id="peoplePanel" hidden style="margin-top:16px">
+    <header>
+      <h2>People</h2>
+    </header>
+    <div class="body">
+      <div id="peopleList"></div>
+      <div id="inviteBox" hidden style="margin-top:14px">
+        <div class="row">
+          <div>
+            <label class="f" for="invName">Invite someone</label>
+            <input id="invName" maxlength="80" placeholder="Their name">
+          </div>
+          <div class="shrink" style="width:160px">
+            <label class="f" for="invRole">They can</label>
+            <select id="invRole">
+              <option value="member">Add and edit</option>
+              <option value="viewer">View only</option>
+              <option value="organizer">Organize</option>
+            </select>
+          </div>
+          <div class="shrink"><button id="sendInvite" type="button">Create invite link</button></div>
+        </div>
+        <p class="note tiny" style="margin:6px 0 0">You'll get a private link to send them. They join by signing in to TravelOS. The link works until 30 days after the trip ends.</p>
+      </div>
+      <div id="inviteResult" hidden style="margin-top:12px">
+        <label class="f" for="inviteUrl">Invite link for <span id="inviteWho"></span></label>
+        <div class="row">
+          <div><input id="inviteUrl" readonly class="mono"></div>
+          <div class="shrink"><button id="copyInvite" class="ghost" type="button">Copy link</button></div>
+        </div>
+        <p class="note tiny" style="margin:6px 0 0">Anyone with this link can join as this person, so send it only to them. It's shown once; use New link to replace it.</p>
+      </div>
+      <p class="note" id="peopleMsg" style="margin:8px 0 0" hidden></p>
+    </div>
+  </section>
+
   <!-- ── expenses ──────────────────────────────────────────── -->
   <section class="panel" id="expPanel" hidden style="margin-top:16px">
     <header>
@@ -1053,7 +1090,7 @@
     }
     saveSession(normalize(d));
     noteWeakPassword(d);
-    ensurePlatform(false);
+    ensurePlatform(false); claimPendingInvite();
     renderAuth();
     loadTrips();
   }
@@ -1076,7 +1113,7 @@
       showMfa(false);
       saveSession(normalize(v.data));
       noteWeakPassword({ weak_password: weak });
-      ensurePlatform(false);
+      ensurePlatform(false); claimPendingInvite();
       renderAuth();
       loadTrips();
     } catch (e) {
@@ -1167,6 +1204,7 @@
     $("aiPanel").hidden = true;
     $("fxPanel").hidden = true;
     $("expPanel").hidden = true;
+    $("peoplePanel").hidden = true;
     $("workArea").hidden = true;
     selectedTripId = null;
   });
@@ -1205,6 +1243,7 @@
     $("itinPanel").hidden = trips.length === 0;
     $("aiPanel").hidden = trips.length === 0;
     $("expPanel").hidden = trips.length === 0;
+    $("peoplePanel").hidden = trips.length === 0;
     fxInit();
     if (trips.length) onTripChange(); else openTripEditor(true);
   }
@@ -1244,7 +1283,7 @@
     loadDerived();
     loadItinerary();
     fxOnTripChange();
-    loadExpenses();
+    loadExpenses().then(loadPeople, loadPeople);
     $("tripForm").hidden = true;
   }
 
@@ -2668,7 +2707,157 @@
   });
 
   // ── boot ───────────────────────────────────────────────────
+  // ADDED 2026-09-24: People & invite links (parity with mobile sharing).
+  // Trip membership lives in trip_members and is managed only through
+  // platform-trips; the expense group mirrors it automatically. A guest
+  // invite is a link carrying a one-time token (platform-trips stores only
+  // its hash). Opening it here and signing in claims it into the account
+  // (platform-auth /guest/claim), which turns the guest row into an account
+  // membership.
+  var PENDING_INVITE_KEY = "travelos_pending_invite";
+  var peopleDisarm = null;
+  var ROLE_LABEL = { owner: "Owner", organizer: "Organizer", member: "Member", viewer: "Viewer" };
+  function canManagePeople() { return myRole() === "organizer"; }
+  function peopleMsg(t, isErr) {
+    var el = $("peopleMsg");
+    el.textContent = t || "";
+    el.hidden = !t;
+    el.className = isErr ? "err" : "note";
+  }
+  function tripsPath(tripId, rest) {
+    return "/functions/v1/platform-trips/trips/" + encodeURIComponent(tripId) + (rest || "");
+  }
+  async function loadPeople() {
+    var t = currentTrip();
+    if (!t || !session) return;
+    var tripId = t.id;
+    peopleMsg("");
+    $("inviteResult").hidden = true;
+    $("peopleList").innerHTML = '<p class="note">Loading…</p>';
+    var r = await call("GET", tripsPath(tripId, "/members?limit=100"));
+    if ((currentTrip() || {}).id !== tripId) return;
+    if (!r.ok) { $("peopleList").innerHTML = ""; peopleMsg(r.detail || "Could not load the people on this trip.", true); return; }
+    var items = (r.data && r.data.items) || [];
+    var manage = canManagePeople();
+    $("inviteBox").hidden = !manage;
+    $("peopleList").innerHTML = items.map(function (m) {
+      var guest = m.kind === "guest";
+      var acts = "";
+      if (manage && m.role !== "owner") {
+        if (guest) acts += '<button class="tiny ghost" type="button" data-rotate="' + esc(m.id) + '">New link</button>';
+        acts += '<button class="tiny danger" type="button" data-remove="' + esc(m.id) + '">Remove</button>';
+      }
+      var nm = m.display_name;
+      if (!nm || /^(owner|member|organizer|viewer)$/i.test(nm)) nm = m.role === "owner" ? "Trip owner" : "Traveler";
+      return '<div class="it" style="grid-template-columns:minmax(0,1fr) auto"><div class="what"><b>' + esc(nm)
+        + "</b><span>" + esc(ROLE_LABEL[m.role] || m.role) + (guest ? " · guest link, no account" : "") + "</span></div>"
+        + '<div class="acts">' + acts + "</div></div>";
+    }).join("") || '<p class="note">Nobody else is on this trip yet.</p>';
+  }
+  function showInviteLink(url, who) {
+    $("inviteUrl").value = url;
+    $("inviteWho").textContent = who;
+    $("inviteResult").hidden = false;
+  }
+  $("sendInvite").addEventListener("click", async function () {
+    var t = currentTrip();
+    var name = $("invName").value.trim();
+    if (!t) return;
+    if (!name) { peopleMsg("Enter the name of the person you're inviting.", true); return; }
+    peopleMsg("");
+    this.disabled = true;
+    try {
+      var r = await call("POST", tripsPath(t.id, "/guests"), { body: { displayName: name, role: $("invRole").value } });
+      if (!r.ok || !r.data || !r.data.inviteUrl) { peopleMsg(r.detail || "Could not create the invite link.", true); return; }
+      $("invName").value = "";
+      showInviteLink(r.data.inviteUrl, name);
+      loadPeople().then(function () { showInviteLink(r.data.inviteUrl, name); });
+    } catch (e) {
+      peopleMsg(NETWORK_HINT, true);
+    } finally { this.disabled = false; }
+  });
+  $("copyInvite").addEventListener("click", async function () {
+    var v = $("inviteUrl").value;
+    try { await navigator.clipboard.writeText(v); this.textContent = "Copied"; }
+    catch (e) { $("inviteUrl").select(); this.textContent = "Press Ctrl+C"; }
+    var b = this;
+    setTimeout(function () { b.textContent = "Copy link"; }, 2500);
+  });
+  $("peopleList").addEventListener("click", async function (e) {
+    var t = currentTrip();
+    var rot = e.target.closest("[data-rotate]");
+    var rem = e.target.closest("[data-remove]");
+    var btn = rot || rem;
+    if (!btn || !t) return;
+    if (!btn.dataset.armed) {
+      btn.dataset.armed = "1";
+      var orig = btn.textContent;
+      btn.textContent = rot ? "Tap again: old link stops working" : "Tap again to remove";
+      clearTimeout(peopleDisarm);
+      peopleDisarm = setTimeout(function () { delete btn.dataset.armed; btn.textContent = orig; }, 5000);
+      return;
+    }
+    clearTimeout(peopleDisarm);
+    btn.disabled = true;
+    peopleMsg("");
+    var r;
+    if (rot) {
+      r = await call("POST", tripsPath(t.id, "/guests/" + encodeURIComponent(rot.getAttribute("data-rotate")) + "/rotate"), { body: {} });
+      if (!r.ok || !r.data || !r.data.inviteUrl) { btn.disabled = false; peopleMsg(r.detail || "Could not make a new link.", true); return; }
+      var who = btn.closest(".it").querySelector("b").textContent;
+      await loadPeople();
+      showInviteLink(r.data.inviteUrl, who);
+      return;
+    }
+    r = await call("DELETE", tripsPath(t.id, "/members/" + encodeURIComponent(rem.getAttribute("data-remove"))));
+    if (!r.ok) { btn.disabled = false; peopleMsg(r.detail || "Could not remove that person.", true); return; }
+    await loadPeople();
+    loadExpenses();
+  });
+
+  // ── invite links: /join?token=… ─────────────────────────────
+  function readInviteToken() {
+    var q = new URLSearchParams(location.search);
+    var tok = q.get("token");
+    if (!tok || !/^\/join\/?$/.test(location.pathname)) return null;
+    // Take the token out of the address bar and history straight away.
+    try { history.replaceState(null, "", "/"); } catch (e) { /* ignore */ }
+    return tok;
+  }
+  function savePendingInvite(tok) {
+    try { localStorage.setItem(PENDING_INVITE_KEY, JSON.stringify({ t: tok, at: Date.now() })); } catch (e) { /* private window */ }
+  }
+  function takePendingInvite() {
+    try {
+      var raw = localStorage.getItem(PENDING_INVITE_KEY);
+      localStorage.removeItem(PENDING_INVITE_KEY);
+      var v = raw ? JSON.parse(raw) : null;
+      if (v && v.t && Date.now() - v.at < 86400000) return v.t;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  async function claimPendingInvite() {
+    var tok = takePendingInvite();
+    if (!tok || !session || !session.access_token) return;
+    var r = await call("POST", "/functions/v1/platform-auth/guest/claim", { body: {}, headers: { "X-Guest-Token": tok } });
+    if (r.ok && r.data && r.data.tripId) {
+      platformReady = true;
+      showBanner("You've joined the trip. It's now in your trip list.");
+      await loadTrips(r.data.tripId);
+      return;
+    }
+    var code = r.data && r.data.error && r.data.error.code;
+    var msg = code === "EXPIRED" ? "That invite link has expired. Ask the trip organizer for a new one."
+      : code === "REVOKED" ? "That invite link was turned off. Ask the trip organizer for a new one."
+      : code === "ALREADY_CLAIMED" ? "That invite link has already been used."
+      : code === "NOT_FOUND" ? "That invite link isn't valid. Ask the trip organizer for a new one."
+      : "We couldn't add you to the trip" + (r.detail ? ": " + r.detail : ".") + " If you're already on this trip, you don't need the link.";
+    showBanner(msg);
+  }
+
   session = loadSession();
+  var inviteTok = readInviteToken();
+  if (inviteTok) savePendingInvite(inviteTok);
   var landing = readAuthRedirect();
   if (landing && landing.error) {
     renderAuth();
@@ -2680,6 +2869,10 @@
   } else {
     renderAuth();
     if (session && session.access_token) loadTrips();
+  }
+  if (inviteTok && !landing) {
+    if (session && session.access_token) claimPendingInvite();
+    else showBanner("You've been invited to a trip. Sign in or create an account below to join it.");
   }
 
   // Probe the backend immediately on load, before anyone clicks anything.

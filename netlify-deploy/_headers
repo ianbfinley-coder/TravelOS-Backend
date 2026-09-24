@@ -3,17 +3,15 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
   Strict-Transport-Security: max-age=31536000
-
-/
-  X-Frame-Options: DENY
-  Content-Security-Policy: frame-ancestors 'none'
-
-/index.html
   X-Frame-Options: DENY
   Content-Security-Policy: frame-ancestors 'none'
 
 /captcha
+  ! X-Frame-Options
+  ! Content-Security-Policy
   Content-Security-Policy: frame-ancestors https://3bb0917d-1af2-497d-b178-9927964e6af4.newly.dev https://newly.app
 
 /captcha.html
+  ! X-Frame-Options
+  ! Content-Security-Policy
   Content-Security-Policy: frame-ancestors https://3bb0917d-1af2-497d-b178-9927964e6af4.newly.dev https://newly.app
