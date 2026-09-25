@@ -318,6 +318,35 @@
   .poll .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
   .poll button.ghost { background: var(--card); }
 
+  /* ── wave 6: preferences, safety & prep, agreements ──────── */
+  .prefgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 4px 12px; }
+  .checks label { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 5px 0; min-width: 0; }
+  .checks input { width: 20px; height: 20px; min-height: 0; padding: 0; margin: 0; accent-color: var(--accent); flex: 0 0 auto; }
+  .checks span { min-width: 0; word-break: break-word; }
+  .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 10px; }
+  .kv div { background: var(--card-2); border-radius: 12px; padding: 8px 12px; min-width: 0; }
+  .kv dt { font-size: 12px; font-weight: 600; color: var(--ink-3); }
+  .kv dd { margin: 0; font-size: 18px; font-weight: 700; }
+  .prep { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 0 12px; align-items: start;
+          padding: 10px 0; border-top: 1px solid var(--line-2); }
+  .prep:first-child { border-top: 0; }
+  .prep .box { width: 22px; height: 22px; min-height: 0; padding: 0; margin: 2px 0 0; accent-color: var(--accent); cursor: pointer; }
+  .prep .what { min-width: 0; word-break: break-word; }
+  .prep .what b { font-weight: 600; }
+  .prep.done .what b, .prep.na .what b { color: var(--ink-3); text-decoration: line-through; font-weight: 500; }
+  .prep .what p { margin: 4px 0 0; font-size: 13.5px; color: var(--ink-2); }
+  .prep .meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; font-size: 12.5px; color: var(--ink-3); }
+  .aq { padding: 10px 0; border-top: 1px solid var(--line-2); }
+  .aq:first-child { border-top: 0; }
+  .aq .p { font-weight: 600; font-size: 14.5px; margin-bottom: 6px; word-break: break-word; }
+  .aq .vis { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+  .aq .list { display: grid; gap: 6px; }
+  .dim { padding: 10px 0; border-top: 1px solid var(--line-2); }
+  .dim:first-child { border-top: 0; }
+  .dim .top { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; }
+  .dim .top b { font-size: 14.5px; }
+  .dim p { margin: 4px 0 0; font-size: 13.5px; color: var(--ink-2); word-break: break-word; }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 
@@ -501,6 +530,17 @@
             <p class="note" id="mfaMsg" style="margin:8px 0 0" hidden></p>
           </div>
         </details>
+        <details id="prefDetails" style="margin-top:12px">
+          <summary class="note" style="cursor:pointer">Travel preferences</summary>
+          <div style="margin-top:8px">
+            <p class="note" style="margin:0 0 10px">Tell TravelOS how you like to travel, and suggestions lean your way. Anything left on &ldquo;No preference&rdquo; is worked out from your trips instead.</p>
+            <div id="prefBody"><p class="note" style="margin:0">Loading&hellip;</p></div>
+            <div class="row" id="prefActs" style="margin-top:12px" hidden>
+              <div class="shrink"><button id="prefSave" type="button">Save preferences</button></div>
+            </div>
+            <p class="note" id="prefMsg" style="margin:8px 0 0" hidden></p>
+          </div>
+        </details>
       </div>
     </div>
   </section>
@@ -648,6 +688,34 @@
     <div class="body">
       <p class="note" id="alertMsg" style="margin:0 0 12px" hidden></p>
       <div id="alertList"><p class="note" style="margin:0">Loading&hellip;</p></div>
+    </div>
+  </section>
+
+  <!-- ── safety & prep (emergency-mode, health-entry-prep, safety-intelligence) -->
+  <section class="panel" id="safePanel" hidden style="margin-top:16px">
+    <header>
+      <h2>Safety &amp; prep</h2>
+    </header>
+    <div class="body">
+      <div class="subhead">Emergency numbers</div>
+      <div class="row">
+        <div><label class="f" for="sosCountry">Country</label><select id="sosCountry"></select></div>
+        <div class="shrink"><button id="sosShow" class="ghost" type="button">Show</button></div>
+      </div>
+      <p class="note" id="sosMsg" style="margin:8px 0 0" hidden></p>
+      <div id="sosOut"></div>
+
+      <div class="subhead">Entry &amp; health checklist</div>
+      <p class="note" style="margin:0 0 10px">Your to-do list for this trip's countries: passport, visas, health, insurance and more. It's built from the countries on your itinerary and doesn't use AI credit.</p>
+      <button id="prepShow" class="ghost tiny" type="button">Show my checklist</button>
+      <p class="note" id="prepMsg" style="margin:8px 0 0" hidden></p>
+      <div id="prepOut"></div>
+
+      <div class="subhead">Travel advisories</div>
+      <p class="note" style="margin:0 0 10px">Official US and UK government travel advice for the countries on your itinerary. Doesn't use AI credit.</p>
+      <button id="advShow" class="ghost tiny" type="button">Check advisories</button>
+      <p class="note" id="advMsg" style="margin:8px 0 0" hidden></p>
+      <div id="advOut"></div>
     </div>
   </section>
 
@@ -800,6 +868,28 @@
       </div>
       <div id="pollList"><p class="note" style="margin:0">Loading&hellip;</p></div>
       <p class="note" id="pollMsg" style="margin:8px 0 0" hidden></p>
+    </div>
+  </section>
+
+  <!-- ── group agreements (agreement-engine) ─────────────────── -->
+  <section class="panel" id="agreePanel" hidden style="margin-top:16px">
+    <header>
+      <h2>Group agreements</h2>
+      <span id="agreeCount" class="chip mute">&mdash;</span>
+    </header>
+    <div class="body">
+      <p class="note" style="margin:0 0 12px">Everyone answers a few quick questions about money, decisions, food and photos, so the group can agree on the ground rules before you go.</p>
+      <div id="agreeReport"><p class="note" style="margin:0">Loading&hellip;</p></div>
+      <details id="agreeDetails" style="margin-top:14px">
+        <summary class="note" style="cursor:pointer">Your answers</summary>
+        <div style="margin-top:8px">
+          <div id="agreeForm"><p class="note" style="margin:0">Loading&hellip;</p></div>
+          <div class="row" id="agreeActs" style="margin-top:12px" hidden>
+            <div class="shrink"><button id="agreeSave" type="button">Save my answers</button></div>
+          </div>
+          <p class="note" id="agreeMsg" style="margin:8px 0 0" hidden></p>
+        </div>
+      </details>
     </div>
   </section>
 
@@ -1117,6 +1207,12 @@
         </header>
         <div class="body">
           <div class="derived" id="derivedList"></div>
+          <div class="row" id="sumRow" style="margin-top:12px;align-items:center" hidden>
+            <div class="shrink"><button id="sumDl" class="ghost tiny" type="button">Download trip summary</button></div>
+            <div><span class="note tiny">A printable page with your plan, reservations and contacts, for when you're offline.</span></div>
+          </div>
+          <p class="note tiny" id="sumNote" style="margin:10px 0 0" hidden>Only the trip's owner can download its summary for now.</p>
+          <p class="note" id="sumMsg" style="margin:8px 0 0" hidden></p>
         </div>
       </section>
     </div>
@@ -1570,6 +1666,10 @@
     $("packPanel").hidden = true;
     $("chatPanel").hidden = true;
     $("pollPanel").hidden = true;
+    $("safePanel").hidden = true;
+    $("agreePanel").hidden = true;
+    $("prefDetails").open = false;
+    pref.loaded = false;
     gcStop();
     hideToast();
     $("workArea").hidden = true;
@@ -1618,6 +1718,8 @@
     $("packPanel").hidden = trips.length === 0;
     $("chatPanel").hidden = trips.length === 0;
     $("pollPanel").hidden = trips.length === 0;
+    $("safePanel").hidden = trips.length === 0;
+    $("agreePanel").hidden = trips.length === 0;
     fxInit();
     if (trips.length) onTripChange(); else openTripEditor(true);
   }
@@ -1666,6 +1768,7 @@
       function () { wave5AfterGroup(); return loadPeople(); });
     loadDocs();
     loadAlerts();
+    wave6OnTripChange();
     $("tripForm").hidden = true;
   }
 
@@ -1958,6 +2061,8 @@
     }
     itinerary = r.data || [];
     itSelPrune(t.id);
+    safe.itinReady = true;
+    sosSyncCountries();
     renderItinerary();
     renderMap();
   }
@@ -4266,6 +4371,713 @@
     if (!r.ok) { btn.disabled = false; expMsg(expDetail(r), true); return; }
     loadExpenses();
   });
+
+  // ── web wave 6 ──────────────────────────────────────────────
+  // ADDED 2026-09-25: travel preferences, Safety & prep (emergency numbers,
+  // entry & health checklist, travel advisories), group agreements, and the
+  // trip summary download. Every call here is free (database reads, public
+  // government sources and Open-Meteo); none of them uses AI credit.
+
+  function safeUrl(u) {
+    return typeof u === "string" && /^https?:\/\//i.test(u) ? u : null;
+  }
+  function telHref(n) {
+    var d = String(n || "").replace(/[^\d+]/g, "");
+    return d ? "tel:" + d : null;
+  }
+  // fmtDay() is the shared one defined with the documents panel.
+  function fnGet(name, rest) { return call("GET", "/functions/v1/" + name + rest); }
+  function wave6Msg(r, notMember, fallback) {
+    if (!r) return NETWORK_HINT;
+    if (r.status === 401) return VERSION_MSG.UNAUTHORIZED;
+    if (r.status === 403 || r.status === 404) return notMember;
+    return fallback;
+  }
+
+  // ── travel preferences (traveler-profile) ───────────────────
+  // Preferences are the profile's per-feature overrides (PATCH
+  // /profile/overrides, one feature per call). The server does a
+  // read-modify-write of the whole overrides object on every PATCH, so the
+  // calls are made one after another, never in parallel, or one would
+  // overwrite another.
+  var PREF_SCALES = [
+    ["style.pace", "Pace", "Relaxed, with downtime", "Packed days"],
+    ["style.walking", "Walking", "As little as possible", "Happy to walk a lot"],
+    ["style.price_level", "Spending", "Keep costs down", "Splurge on quality"],
+    ["style.crowd_tolerance", "Crowds", "Quiet places", "Busy is fine"],
+    ["style.early_bird", "Mornings", "Late starts", "Early starts"],
+    ["style.local_vs_iconic", "Sights", "Famous landmarks", "Local spots"],
+    ["style.novelty", "New things", "Familiar favorites", "New and unusual"],
+    ["style.planning", "Planning", "Spontaneous", "Planned in detail"]
+  ];
+  var PREF_INTERESTS = [
+    ["food.local_traditional", "Local food"], ["food.street_food", "Street food"], ["food.fine_dining", "Fine dining"],
+    ["food.cafes", "Cafés"], ["food.vegetarian_friendly", "Vegetarian-friendly"],
+    ["culture.history", "History"], ["culture.art_museums", "Art & museums"], ["culture.architecture", "Architecture"],
+    ["culture.performing_arts", "Shows & theater"], ["outdoors.hiking", "Hiking"], ["outdoors.beach", "Beaches"],
+    ["outdoors.parks_gardens", "Parks & gardens"], ["outdoors.viewpoints", "Viewpoints"], ["nightlife.bars", "Bars"],
+    ["nightlife.live_music", "Live music"], ["shopping.markets", "Markets"], ["wellness.spa", "Spa & wellness"],
+    ["family.kid_friendly", "Kid-friendly"]
+  ];
+  var pref = { loaded: false, busy: false, overrides: {}, paused: false, seq: 0 };
+  function prefScaleOptions(left, right) {
+    return [["", "No preference"], ["-1", left], ["-0.5", "Leaning: " + left.toLowerCase()], ["0", "In between"],
+      ["0.5", "Leaning: " + right.toLowerCase()], ["1", right]];
+  }
+  function prefNearest(v) {
+    var steps = [-1, -0.5, 0, 0.5, 1];
+    var best = steps[0];
+    steps.forEach(function (s) { if (Math.abs(s - v) < Math.abs(best - v)) best = s; });
+    return String(best);
+  }
+  async function loadPrefs() {
+    if (!session) return;
+    var seq = ++pref.seq;
+    setMsg("prefMsg", "");
+    $("prefActs").hidden = true;
+    $("prefBody").innerHTML = '<p class="note" style="margin:0">Loading&hellip;</p>';
+    var r;
+    try { r = await fnGet("traveler-profile", "/profile/me"); } catch (e) { r = null; }
+    if (seq !== pref.seq) return;
+    if (!r || !r.ok || !r.data) {
+      $("prefBody").innerHTML = "";
+      setMsg("prefMsg", r && r.status === 401 ? VERSION_MSG.UNAUTHORIZED
+        : r ? "Your travel preferences couldn't be loaded right now. Try again in a moment." : NETWORK_HINT, true);
+      return;
+    }
+    var prof = r.data.profile || null;
+    pref.overrides = (prof && prof.overrides && typeof prof.overrides === "object") ? prof.overrides : {};
+    pref.paused = !!(prof && prof.learningPaused);
+    pref.loaded = true;
+    renderPrefs(Array.isArray(r.data.persona) ? r.data.persona : []);
+  }
+  function renderPrefs(persona) {
+    var o = pref.overrides;
+    var html = '<div class="prefgrid">' + PREF_SCALES.map(function (sc) {
+      var cur = typeof o[sc[0]] === "number" ? prefNearest(o[sc[0]]) : "";
+      return '<div><label class="f" for="pf_' + esc(sc[0].replace(".", "_")) + '">' + esc(sc[1]) + "</label>"
+        + '<select id="pf_' + esc(sc[0].replace(".", "_")) + '" data-pref="' + esc(sc[0]) + '">'
+        + prefScaleOptions(sc[2], sc[3]).map(function (op) {
+            return '<option value="' + op[0] + '"' + (op[0] === cur ? " selected" : "") + ">" + esc(op[1]) + "</option>";
+          }).join("")
+        + "</select></div>";
+    }).join("") + "</div>";
+    html += '<label class="f" style="margin-top:14px">I enjoy</label><div class="checks">' + PREF_INTERESTS.map(function (it) {
+      var on = typeof o[it[0]] === "number" && o[it[0]] > 0;
+      return '<label><input type="checkbox" data-interest="' + esc(it[0]) + '"' + (on ? " checked" : "") + "><span>" + esc(it[1]) + "</span></label>";
+    }).join("") + "</div>";
+    html += '<p class="note tiny" style="margin:10px 0 0">Allergies, dietary needs and accessibility needs are private: you can note them in a trip\'s Group agreements, where they\'re never shown to anyone else.</p>';
+    html += '<div class="checks" style="margin-top:10px"><label style="grid-column:1/-1"><input type="checkbox" id="prefLearn"' + (pref.paused ? "" : " checked")
+      + "><span>Also learn from what I keep, skip and rate on my trips</span></label></div>";
+    if (persona.length) {
+      html += '<label class="f" style="margin-top:14px">What TravelOS has picked up so far</label><ul style="margin:0 0 0 18px;padding:0">'
+        + persona.map(function (p) { return '<li class="note">' + esc(p.label || "") + "</li>"; }).join("") + "</ul>";
+    }
+    $("prefBody").innerHTML = html;
+    $("prefActs").hidden = false;
+  }
+  function prefWanted() {
+    var want = {};
+    Array.prototype.forEach.call($("prefBody").querySelectorAll("[data-pref]"), function (sel) {
+      want[sel.getAttribute("data-pref")] = sel.value === "" ? null : Number(sel.value);
+    });
+    Array.prototype.forEach.call($("prefBody").querySelectorAll("[data-interest]"), function (cb) {
+      var k = cb.getAttribute("data-interest"), cur = pref.overrides[k];
+      if (cb.checked) want[k] = typeof cur === "number" && cur > 0 ? cur : 1;
+      // Unticking clears an "I enjoy"; a dislike set elsewhere is left alone.
+      else want[k] = typeof cur === "number" && cur <= 0 ? cur : null;
+    });
+    return want;
+  }
+  $("prefDetails").addEventListener("toggle", function () {
+    if (this.open && !pref.busy) loadPrefs();
+  });
+  $("prefSave").addEventListener("click", async function () {
+    if (pref.busy || !pref.loaded) return;
+    var want = prefWanted(), cur = pref.overrides, changes = [];
+    Object.keys(want).forEach(function (k) {
+      var had = typeof cur[k] === "number" ? cur[k] : null;
+      // A value saved elsewhere (say -0.4) shows as its nearest step here;
+      // leaving that step alone must not rewrite it.
+      if (had !== null && want[k] !== null && k.indexOf("style.") === 0 && prefNearest(had) === String(want[k])) return;
+      if (want[k] === null ? had !== null : had === null || Math.abs(had - want[k]) > 1e-9) changes.push([k, want[k]]);
+    });
+    var learn = $("prefLearn").checked;
+    var learnChanged = learn === pref.paused;
+    if (!changes.length && !learnChanged) { setMsg("prefMsg", "Nothing has changed."); return; }
+    pref.busy = true;
+    this.disabled = true;
+    setMsg("prefMsg", "Saving…");
+    var failed = 0, expired = false, offline = false;
+    try {
+      for (var i = 0; i < changes.length; i++) {
+        var r = null;
+        try { r = await call("PATCH", "/functions/v1/traveler-profile/profile/overrides", { body: { featureKey: changes[i][0], value: changes[i][1] } }); }
+        catch (e) { offline = true; break; }
+        if (!r.ok) { failed++; if (r.status === 401) { expired = true; break; } }
+        else if (r.data && r.data.overrides) pref.overrides = r.data.overrides;
+      }
+      if (learnChanged && !expired && !offline) {
+        var lr = null;
+        try { lr = await call("POST", "/functions/v1/traveler-profile/profile/" + (learn ? "resume" : "pause"), { body: {} }); }
+        catch (e) { offline = true; }
+        if (lr && !lr.ok) { failed++; if (lr.status === 401) expired = true; }
+      }
+    } finally {
+      pref.busy = false;
+      this.disabled = false;
+    }
+    if (offline) { setMsg("prefMsg", NETWORK_HINT, true); return; }
+    if (expired) { setMsg("prefMsg", VERSION_MSG.UNAUTHORIZED, true); return; }
+    await loadPrefs();
+    setMsg("prefMsg", failed ? "Some of your changes didn't save. Check them below and try again." : "Saved.", !!failed);
+  });
+
+  // ── safety & prep ───────────────────────────────────────────
+  var SOS_COUNTRIES = { US: "United States", GB: "United Kingdom", FR: "France", DE: "Germany", ES: "Spain", IT: "Italy",
+    PT: "Portugal", JP: "Japan", TH: "Thailand", AU: "Australia", NZ: "New Zealand", CA: "Canada", MX: "Mexico",
+    BR: "Brazil", IN: "India", SG: "Singapore", GR: "Greece", NL: "Netherlands", BE: "Belgium", CH: "Switzerland" };
+  var safe = { tripId: null, seq: 0, picked: false, prep: [], prepBusy: {}, itinReady: false };
+  function countryName(cc) { return SOS_COUNTRIES[cc] || cc; }
+  function tripCountries() {
+    var counts = {};
+    if (!safe.itinReady) return [];
+    (itinerary || []).forEach(function (it) {
+      var cc = String(it.country_code || "").trim().toUpperCase();
+      if (/^[A-Z]{2}$/.test(cc)) counts[cc] = (counts[cc] || 0) + 1;
+    });
+    return Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; });
+  }
+  function sosSyncCountries() {
+    var sel = $("sosCountry"), keep = sel.value;
+    var mine = tripCountries();
+    var codes = mine.concat(Object.keys(SOS_COUNTRIES).filter(function (c) { return mine.indexOf(c) < 0; })
+      .sort(function (a, b) { return countryName(a).localeCompare(countryName(b)); }));
+    sel.innerHTML = '<option value="">Choose a country</option>' + codes.map(function (c) {
+      return '<option value="' + esc(c) + '">' + esc(countryName(c)) + (mine.indexOf(c) >= 0 ? " (on this trip)" : "") + "</option>";
+    }).join("");
+    sel.value = safe.picked && keep ? keep : (mine[0] || "");
+  }
+  function safeOnTripChange() {
+    var t = currentTrip();
+    safe.tripId = t ? t.id : null;
+    safe.seq++;
+    safe.picked = false;
+    safe.itinReady = false;
+    safe.prep = [];
+    safe.prepBusy = {};
+    ["sosOut", "prepOut", "advOut"].forEach(function (id) { $(id).innerHTML = ""; });
+    ["sosMsg", "prepMsg", "advMsg"].forEach(function (id) { setMsg(id, ""); });
+    $("prepShow").hidden = false;
+    $("advShow").hidden = false;
+    sosSyncCountries();
+  }
+  $("sosCountry").addEventListener("change", function () { safe.picked = true; });
+
+  $("sosShow").addEventListener("click", async function () {
+    var t = currentTrip(), cc = $("sosCountry").value;
+    if (!t) return;
+    if (!cc) { setMsg("sosMsg", "Choose a country first.", true); return; }
+    var seq = safe.seq, btn = this;
+    btn.disabled = true;
+    setMsg("sosMsg", "");
+    $("sosOut").innerHTML = '<p class="note" style="margin:8px 0 0">Loading&hellip;</p>';
+    var r;
+    try { r = await fnGet("emergency-mode", "/sos-card?country=" + encodeURIComponent(cc) + "&tripId=" + encodeURIComponent(t.id)); }
+    catch (e) { r = null; }
+    finally { btn.disabled = false; }
+    if (seq !== safe.seq) return;
+    if (!r || !r.ok || !r.data) {
+      $("sosOut").innerHTML = "";
+      setMsg("sosMsg", r && r.status === 401 ? VERSION_MSG.UNAUTHORIZED
+        : r ? "Emergency numbers couldn't be loaded right now. Try again in a moment." : NETWORK_HINT, true);
+      return;
+    }
+    renderSos(cc, r.data);
+  });
+  function renderSos(cc, d) {
+    var html = "";
+    var rows = Array.isArray(d.emergencyNumbers) ? d.emergencyNumbers : [];
+    var nums = [];
+    rows.forEach(function (row) {
+      [["general", "Emergency"], ["police", "Police"], ["ambulance", "Ambulance"], ["fire", "Fire"]].forEach(function (k) {
+        if (row && row[k[0]] && !nums.some(function (n) { return n[0] === k[1]; })) nums.push([k[1], String(row[k[0]]), row.reviewed_at, row.source_url]);
+      });
+    });
+    if (nums.length) {
+      html += '<div class="kv">' + nums.map(function (n) {
+        var href = telHref(n[1]);
+        return "<div><dt>" + esc(n[0]) + "</dt><dd>" + (href ? '<a href="' + esc(href) + '">' + esc(n[1]) + "</a>" : esc(n[1])) + "</dd></div>";
+      }).join("") + "</div>";
+      var src = safeUrl(rows[0] && rows[0].source_url), rev = rows[0] && rows[0].reviewed_at;
+      html += '<p class="note tiny" style="margin:8px 0 0">' + (rev ? "Last checked " + esc(fmtDay(rev)) + ". " : "")
+        + (src ? '<a href="' + esc(src) + '" target="_blank" rel="noopener">Source</a>' : "") + "</p>";
+    } else if (d.emergencyNumbersStatus === "lookup_failed") {
+      html += '<p class="err" style="margin:8px 0 0">The emergency numbers for ' + esc(countryName(cc)) + " couldn't be looked up just now. Try again, and check an official source before you travel.</p>";
+    } else {
+      html += '<p class="note" style="margin:8px 0 0">TravelOS doesn\'t have checked emergency numbers for ' + esc(countryName(cc)) + " yet. Look them up from an official source before you travel.</p>";
+    }
+    if (d.lodging && (d.lodging.name || d.lodging.address)) {
+      html += '<p class="note" style="margin:10px 0 0"><strong>Where you\'re staying:</strong> ' + esc(d.lodging.name || "") + (d.lodging.address ? " · " + esc(d.lodging.address) : "") + "</p>";
+    }
+    var phrases = Array.isArray(d.phraseCards) ? d.phraseCards : [];
+    if (phrases.length) {
+      html += '<label class="f" style="margin-top:12px">Useful phrases</label><div class="kv">' + phrases.map(function (p) {
+        return '<div><dt>' + esc(p.translation || "") + '</dt><dd style="font-size:15px">' + esc(p.phrase || "") + '</dd><span class="note tiny">' + esc(p.phonetic || "") + "</span></div>";
+      }).join("") + "</div>";
+    }
+    html += '<p class="note tiny" style="margin:10px 0 0">Your embassy or consulate depends on your citizenship, so look up your own country\'s in ' + esc(countryName(cc)) + " before you go.</p>";
+    $("sosOut").innerHTML = html;
+  }
+
+  // Entry & health checklist. GET /prep/me builds the list the first time and
+  // returns the saved one after that; the home time zone lets it add a
+  // jet-lag plan when it's built.
+  var PREP_SEV = { blocking: ["bad", "Must do"], important: ["warn", "Important"], info: ["mute", "Good to know"] };
+  $("prepShow").addEventListener("click", async function () {
+    var t = currentTrip();
+    if (!t) return;
+    var seq = safe.seq, btn = this;
+    btn.disabled = true;
+    setMsg("prepMsg", "Getting your checklist…");
+    var r;
+    try { r = await fnGet("health-entry-prep", "/prep/me?tripId=" + encodeURIComponent(t.id) + "&homeTz=" + encodeURIComponent(browserTz())); }
+    catch (e) { r = null; }
+    finally { btn.disabled = false; }
+    if (seq !== safe.seq) return;
+    if (!r || !r.ok || !r.data) {
+      setMsg("prepMsg", wave6Msg(r, "Only people on this trip can see its checklist.", "Your checklist couldn't be loaded right now. Try again in a moment."), true);
+      return;
+    }
+    setMsg("prepMsg", "");
+    safe.prep = Array.isArray(r.data.items) ? r.data.items : [];
+    btn.hidden = true;
+    if (!safe.prep.length) {
+      btn.hidden = false;
+      btn.textContent = "Try again";
+      setMsg("prepMsg", "There's nothing to check yet. Add a country code (like PT) to the stops on your itinerary, then try again.");
+      return;
+    }
+    renderPrep();
+  });
+  function renderPrep() {
+    var t = currentTrip();
+    $("prepOut").innerHTML = '<div style="margin-top:8px">' + safe.prep.map(function (it) {
+      var sev = PREP_SEV[it.severity] || PREP_SEV.info, st = it.status || "todo", src = safeUrl(it.source_url);
+      return '<div class="prep' + (st === "done" ? " done" : st === "not_applicable" ? " na" : "") + '" data-id="' + esc(it.id) + '">'
+        + '<input type="checkbox" class="box" data-prep aria-label="Done: ' + esc(it.title || "") + '"' + (st === "done" ? " checked" : "") + ">"
+        + '<div class="what"><b>' + esc(it.title || "") + "</b>"
+        + (it.detail ? "<p>" + esc(it.detail) + "</p>" : "")
+        + '<div class="meta"><span class="chip ' + sev[0] + '">' + esc(sev[1]) + "</span>"
+        + (it.due_date && st === "todo" ? "<span>By " + esc(fmtDay(it.due_date)) + "</span>" : "")
+        + (src ? '<a href="' + esc(src) + '" target="_blank" rel="noopener">Official info</a>' : "")
+        + '<button type="button" class="ghost tiny" data-na>' + (st === "not_applicable" ? "Needed after all" : "Not needed") + "</button>"
+        + "</div></div></div>";
+    }).join("") + "</div>";
+    var done = safe.prep.filter(function (i) { return i.status !== "todo"; }).length;
+    setMsg("prepMsg", done + " of " + safe.prep.length + " done" + (t && t.start_date ? " · trip starts " + fmtDay(t.start_date) : ""));
+  }
+  async function prepSet(id, status) {
+    var t = currentTrip(), it = safe.prep.filter(function (x) { return x.id === id; })[0];
+    if (!t || !it || safe.prepBusy[id]) return;
+    var before = it.status, seq = safe.seq;
+    safe.prepBusy[id] = true;
+    it.status = status;
+    renderPrep();
+    var r;
+    try { r = await call("PATCH", "/functions/v1/health-entry-prep/prep/me/" + encodeURIComponent(id) + "?tripId=" + encodeURIComponent(t.id), { body: { status: status } }); }
+    catch (e) { r = null; }
+    delete safe.prepBusy[id];
+    if (seq !== safe.seq) return;
+    if (!r || !r.ok) {
+      it.status = before;
+      renderPrep();
+      setMsg("prepMsg", wave6Msg(r, "That item couldn't be found any more. Show the checklist again to refresh it.", "That didn't save. Try again in a moment."), true);
+    }
+  }
+  $("prepOut").addEventListener("click", function (e) {
+    var row = e.target.closest(".prep");
+    if (!row) return;
+    var id = row.getAttribute("data-id"), it = safe.prep.filter(function (x) { return x.id === id; })[0];
+    if (!it) return;
+    if (e.target.closest("[data-prep]")) prepSet(id, e.target.checked ? "done" : "todo");
+    else if (e.target.closest("[data-na]")) prepSet(id, it.status === "not_applicable" ? "todo" : "not_applicable");
+  });
+
+  // Travel advisories (US State Department and UK FCDO, via
+  // safety-intelligence /briefings).
+  var US_LEVEL = { 1: "Level 1: Exercise normal precautions", 2: "Level 2: Exercise increased caution",
+    3: "Level 3: Reconsider travel", 4: "Level 4: Do not travel" };
+  var LEVEL_CHIP = { 1: "ok", 2: "warn", 3: "bad", 4: "bad" };
+  $("advShow").addEventListener("click", async function () {
+    var t = currentTrip();
+    if (!t) return;
+    var seq = safe.seq, btn = this;
+    btn.disabled = true;
+    setMsg("advMsg", "Checking…");
+    var r;
+    try { r = await fnGet("safety-intelligence", "/briefings?tripId=" + encodeURIComponent(t.id)); }
+    catch (e) { r = null; }
+    finally { btn.disabled = false; }
+    if (seq !== safe.seq) return;
+    if (!r || !r.ok || !r.data) {
+      setMsg("advMsg", wave6Msg(r, "Only people on this trip can check its advisories.", "Advisories couldn't be checked right now. Try again in a moment."), true);
+      return;
+    }
+    var list = Array.isArray(r.data.briefings) ? r.data.briefings : [];
+    if (!list.length) {
+      setMsg("advMsg", "There's nothing to check yet. Add a country code (like PT) to the stops on your itinerary, then try again.");
+      return;
+    }
+    setMsg("advMsg", "");
+    btn.textContent = "Check again";
+    $("advOut").innerHTML = '<div style="margin-top:8px">' + list.map(function (b) {
+      var srcs = Array.isArray(b.sources) ? b.sources : [];
+      var body = srcs.length ? srcs.map(function (s) {
+        var lvl = Number(s.level), url = safeUrl(s.advisoryUrl);
+        var head = String(s.headline || "");
+        if (head.length > 320) head = head.slice(0, 317).replace(/\s+\S*$/, "") + "…";
+        var who = s.source === "UK" ? "UK government" : "US State Department";
+        var label = s.source === "US" && US_LEVEL[lvl] ? US_LEVEL[lvl] : (s.level != null && s.level !== "" ? "Level " + s.level : null);
+        return '<div class="dim"><div class="top"><b>' + esc(who) + "</b>"
+          + (label ? '<span class="chip ' + (LEVEL_CHIP[lvl] || "mute") + '">' + esc(label) + "</span>" : "") + "</div>"
+          + (head && !/^no advisory found/i.test(head) ? "<p>" + esc(head) + "</p>" : "<p>No advisory text was available.</p>")
+          + '<p class="tiny">' + (s.fetchedAt ? "Checked " + esc(when(s.fetchedAt)) + (s.stale ? " (couldn't refresh, so this may be out of date)" : "") + ". " : "")
+          + (url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">Read the official advice</a>' : "") + "</p></div>";
+      }).join("") : '<p class="note" style="margin:4px 0 0">No official advice could be fetched for this country right now. Check your government\'s travel advice site directly.</p>';
+      return '<div class="res" style="margin-top:10px"><div class="top"><span class="name">' + esc(countryName(b.countryCode || "")) + "</span></div>" + body + "</div>";
+    }).join("") + '<p class="note tiny" style="margin:10px 0 0">Always check the latest official advice before you travel.</p></div>';
+  });
+
+  // ── group agreements (agreement-engine) ─────────────────────
+  // Some parts of the server's summary aren't meaningful yet and are left
+  // out: "pace", "wake_time" and "together" each mix answers from questions
+  // of different kinds (a wake-up time with a bedtime, a scale with a
+  // choice) and so read as a disagreement even for one person, and
+  // "must_dos" is free text with no comparison. Their suggestions go with
+  // them. Applying a suggestion isn't offered: the server only records it.
+  var AGREE_DIMS = { splitting: "Splitting shared costs", decision_style: "Making group decisions", dropout: "If someone drops out",
+    food: "Trying new food", photo_consent: "Photos on social media", comms: "Group chat style", interests: "Interests" };
+  var AGREE_STATE = { aligned: ["ok", "On the same page"], mixed: ["warn", "Some differences"], divergent: ["bad", "Big differences"] };
+  var AGREE_SECTIONS = { pace: "Pace", must_dos: "Must-dos", together: "Time together", rooms: "Rooms", money: "Money",
+    decisions: "Decisions", dropout: "Drop-outs", food: "Food", comms: "Photos and chat", access: "Accessibility" };
+  var AGREE_VIS = { shared: "Everyone on the trip can see this answer.",
+    aggregate: "Only shown as a group total, never with your name.",
+    private: "Private. Never shown to anyone else on the trip." };
+  var agree = { tripId: null, seq: 0, questions: [], answers: {}, report: null, busy: false, formReady: false };
+  function agreeOptLabel(val) {
+    for (var i = 0; i < agree.questions.length; i++) {
+      var q = agree.questions[i];
+      var o = (q.options || []).filter(function (x) { return x.value === val; })[0];
+      if (o) return o.label;
+    }
+    return val;
+  }
+  async function loadAgree() {
+    var t = currentTrip();
+    if (!t || !session) return;
+    var tripId = t.id, seq = ++agree.seq, q = "?tripId=" + encodeURIComponent(tripId);
+    agree.tripId = tripId;
+    agree.formReady = false;
+    $("agreeCount").textContent = "—";
+    $("agreeCount").className = "chip mute";
+    $("agreeReport").innerHTML = '<p class="note" style="margin:0">Loading&hellip;</p>';
+    $("agreeForm").innerHTML = '<p class="note" style="margin:0">Loading&hellip;</p>';
+    $("agreeActs").hidden = true;
+    setMsg("agreeMsg", "");
+    var res;
+    try {
+      res = await Promise.all([fnGet("agreement-engine", "/questions" + q), fnGet("agreement-engine", "/progress" + q), fnGet("agreement-engine", "/report" + q)]);
+    } catch (e) { res = null; }
+    if (seq !== agree.seq) return;
+    if (!res) { $("agreeReport").innerHTML = '<p class="err" style="margin:0">' + esc(NETWORK_HINT) + "</p>"; $("agreeForm").innerHTML = ""; return; }
+    var qs = res[0], pg = res[1], rp = res[2];
+    if (!qs.ok || !qs.data) {
+      var m = wave6Msg(qs, "Only people on this trip can see its agreements.", "Group agreements couldn't be loaded right now. Try again in a moment.");
+      $("agreeReport").innerHTML = '<p class="note" style="margin:0">' + esc(m) + "</p>";
+      $("agreeForm").innerHTML = "";
+      return;
+    }
+    agree.questions = Array.isArray(qs.data.questions) ? qs.data.questions : [];
+    agree.answers = qs.data.existingAnswers && typeof qs.data.existingAnswers === "object" ? qs.data.existingAnswers : {};
+    if (pg.ok && pg.data) {
+      var total = Number(pg.data.totalMembers) || 0, doneN = Number(pg.data.completedCount) || 0;
+      $("agreeCount").textContent = pg.data.rosterKnown && total ? doneN + " of " + total + " answered" : doneN + " answered";
+      $("agreeCount").className = "chip " + (pg.data.rosterKnown && total && doneN >= total ? "ok" : "acc");
+    }
+    agree.report = rp.ok && rp.data ? rp.data : null;
+    renderAgreeReport(rp);
+    renderAgreeForm();
+  }
+  function renderAgreeReport(rp) {
+    var el = $("agreeReport"), d = agree.report;
+    if (!d) {
+      el.innerHTML = '<p class="note" style="margin:0">' + (rp && rp.status === 404
+        ? "Nothing to compare yet. A summary appears here once people have answered."
+        : "The group summary couldn't be loaded right now.") + "</p>";
+      return;
+    }
+    var dims = d.dimensions && typeof d.dimensions === "object" ? d.dimensions : {};
+    var html = "", sugg = [], seen = {};
+    Object.keys(AGREE_DIMS).forEach(function (k) {
+      var x = dims[k];
+      if (!x || !AGREE_STATE[x.state]) return;
+      var st = AGREE_STATE[x.state];
+      var dist = x.distribution && typeof x.distribution === "object" ? Object.keys(x.distribution).map(function (v) {
+        return agreeOptLabel(v) + ": " + x.distribution[v];
+      }) : [];
+      html += '<div class="dim"><div class="top"><b>' + esc(AGREE_DIMS[k]) + '</b><span class="chip ' + st[0] + '">' + esc(st[1]) + "</span></div>"
+        + (dist.length ? "<p>" + esc(dist.join(" · ")) + "</p>" : "") + "</div>";
+      (Array.isArray(x.suggestions) ? x.suggestions : []).forEach(function (s) {
+        if (s && s.text && !seen[s.id]) { seen[s.id] = 1; sugg.push(s.text); }
+      });
+    });
+    var must = Array.isArray(d.mustDos) ? d.mustDos.filter(Boolean) : [];
+    var conflicts = Array.isArray(d.conflicts) ? d.conflicts.filter(function (c) { return c && c.message && c.kind !== "dietary_dining_check_failed"; }) : [];
+    if (!html && !must.length && !sugg.length && !conflicts.length) {
+      el.innerHTML = '<p class="note" style="margin:0">Answers are in, but there\'s nothing to compare yet.</p>';
+      return;
+    }
+    var out = '<p class="note tiny" style="margin:0 0 6px">Based on ' + esc(String(d.respondentCount || 0)) + " " + (Number(d.respondentCount) === 1 ? "person's answers" : "people's answers")
+      + (d.computedAt ? " · updated " + esc(when(d.computedAt)) : "") + "</p>";
+    if (html) out += "<div>" + html + "</div>";
+    if (sugg.length) out += '<label class="f" style="margin-top:12px">Ideas</label><ul style="margin:0 0 0 18px;padding:0">' + sugg.map(function (s) { return '<li class="note">' + esc(s) + "</li>"; }).join("") + "</ul>";
+    if (must.length) out += '<label class="f" style="margin-top:12px">Must-dos</label><ul style="margin:0 0 0 18px;padding:0">' + must.map(function (s) { return '<li class="note">' + esc(s) + "</li>"; }).join("") + "</ul>";
+    if (conflicts.length) out += conflicts.map(function (c) { return '<div class="hazard">' + esc(c.message) + "</div>"; }).join("");
+    el.innerHTML = out;
+  }
+  function agreeInput(q, a) {
+    var id = "aq_" + q.id.replace(/[^a-z0-9_]/gi, "_"), v = a ? a.value : undefined;
+    if (q.kind === "time") return '<input type="time" id="' + id + '" data-q="' + esc(q.id) + '" value="' + esc(typeof v === "string" ? v : "") + '">';
+    if (q.kind === "single") {
+      return '<select id="' + id + '" data-q="' + esc(q.id) + '"><option value="">No answer</option>' + (q.options || []).map(function (o) {
+        return '<option value="' + esc(o.value) + '"' + (v === o.value ? " selected" : "") + ">" + esc(o.label) + "</option>";
+      }).join("") + "</select>";
+    }
+    if (q.kind === "scale" && q.scale) {
+      var opts = '<option value="">No answer</option>';
+      for (var n = q.scale.min; n <= q.scale.max; n++) {
+        var lbl = String(n) + (n === q.scale.min ? " (" + q.scale.minLabel + ")" : n === q.scale.max ? " (" + q.scale.maxLabel + ")" : "");
+        opts += '<option value="' + n + '"' + (Number(v) === n ? " selected" : "") + ">" + esc(lbl) + "</option>";
+      }
+      return '<select id="' + id + '" data-q="' + esc(q.id) + '" data-num="1">' + opts + "</select>";
+    }
+    if (q.kind === "range" && q.scale) {
+      var cur = Array.isArray(v) ? v[1] : (typeof v === "number" ? v : "");
+      return '<input type="number" inputmode="numeric" min="' + q.scale.min + '" max="' + q.scale.max + '" step="1" id="' + id + '" data-q="' + esc(q.id) + '" data-range="1" placeholder="Up to how many km?" value="' + esc(String(cur)) + '">';
+    }
+    if (q.kind === "multi") {
+      var arr = Array.isArray(v) ? v : [];
+      return '<div class="checks" data-q="' + esc(q.id) + '" data-multi="1">' + (q.options || []).map(function (o) {
+        return '<label><input type="checkbox" value="' + esc(o.value) + '"' + (arr.indexOf(o.value) >= 0 ? " checked" : "") + "><span>" + esc(o.label) + "</span></label>";
+      }).join("") + "</div>";
+    }
+    if (q.kind === "list") {
+      var items = Array.isArray(v) ? v : [];
+      var ins = "";
+      for (var k = 0; k < 3; k++) ins += '<input type="text" maxlength="120" aria-label="' + esc(q.prompt) + " " + (k + 1) + '" value="' + esc(items[k] || "") + '">';
+      return '<div class="list" data-q="' + esc(q.id) + '" data-list="1">' + ins + "</div>";
+    }
+    return '<textarea id="' + id + '" data-q="' + esc(q.id) + '" rows="2" maxlength="500">' + esc(typeof v === "string" ? v : "") + "</textarea>";
+  }
+  function renderAgreeForm() {
+    if (!agree.questions.length) { $("agreeForm").innerHTML = '<p class="note" style="margin:0">There are no questions for this trip.</p>'; return; }
+    var html = "", last = null;
+    agree.questions.forEach(function (q) {
+      if (q.section !== last) {
+        last = q.section;
+        html += '<div class="subhead" style="margin:16px 0 2px">' + esc(AGREE_SECTIONS[q.section] || q.section) + "</div>";
+      }
+      var vis = q.sensitive ? "private" : q.defaultVisibility;
+      html += '<div class="aq"><div class="p">' + esc(q.prompt) + (q.optional ? ' <span class="note tiny">(optional)</span>' : "") + "</div>"
+        + agreeInput(q, agree.answers[q.id]) + '<div class="vis">' + esc(AGREE_VIS[vis] || "") + "</div></div>";
+    });
+    $("agreeForm").innerHTML = html;
+    $("agreeActs").hidden = false;
+    agree.formReady = true;
+  }
+  function agreeCollect() {
+    var out = [], bad = null;
+    Array.prototype.forEach.call($("agreeForm").querySelectorAll("[data-q]"), function (el) {
+      var id = el.getAttribute("data-q"), val;
+      if (el.getAttribute("data-multi")) {
+        val = Array.prototype.map.call(el.querySelectorAll("input:checked"), function (c) { return c.value; });
+        if (!val.length) return;
+      } else if (el.getAttribute("data-list")) {
+        val = Array.prototype.map.call(el.querySelectorAll("input"), function (c) { return c.value.trim(); }).filter(Boolean);
+        if (!val.length) return;
+      } else if (el.getAttribute("data-range")) {
+        if (el.value === "") return;
+        var n = Number(el.value);
+        if (!isFinite(n) || n < Number(el.min) || n > Number(el.max)) { bad = bad || "Walking distance needs to be a number from " + el.min + " to " + el.max + "."; return; }
+        val = [0, Math.round(n)];
+      } else if (el.getAttribute("data-num")) {
+        if (el.value === "") return;
+        val = Number(el.value);
+      } else {
+        val = el.value.trim();
+        if (!val) return;
+      }
+      out.push({ questionId: id, value: val });
+    });
+    return { answers: out, bad: bad };
+  }
+  $("agreeSave").addEventListener("click", async function () {
+    var t = currentTrip();
+    if (!t || agree.busy || !agree.formReady || agree.tripId !== t.id) return;
+    var c = agreeCollect();
+    if (c.bad) { setMsg("agreeMsg", c.bad, true); return; }
+    if (!c.answers.length) { setMsg("agreeMsg", "Answer at least one question first.", true); return; }
+    var seq = agree.seq, btn = this;
+    agree.busy = true;
+    btn.disabled = true;
+    setMsg("agreeMsg", "Saving…");
+    var r;
+    try { r = await call("PUT", "/functions/v1/agreement-engine/responses", { body: { tripId: t.id, answers: c.answers } }); }
+    catch (e) { r = null; }
+    finally { agree.busy = false; btn.disabled = false; }
+    if (seq !== agree.seq) return;
+    if (!r || !r.ok) {
+      setMsg("agreeMsg", wave6Msg(r, "Only people on this trip can answer its questions.", "Your answers didn't save. Try again in a moment."), true);
+      return;
+    }
+    setMsg("agreeMsg", "Saved. The group summary can take a couple of minutes to catch up.");
+    setTimeout(function () {
+      if (seq !== agree.seq) return;
+      var open = $("agreeDetails").open;
+      loadAgree().then(function () {
+        $("agreeDetails").open = open;
+        setMsg("agreeMsg", "Saved. The group summary can take a couple of minutes to catch up.");
+      });
+    }, 2500);
+  });
+
+  // ── trip summary download (generate-offline-pack) ───────────
+  // POST / rebuilds the trip's offline pack and returns its contents, which
+  // are turned into a printable page here. The function only serves the
+  // trip's owner (trips.user_id), so the button is shown only to them.
+  var sum = { busy: false };
+  function sumSync() {
+    var t = currentTrip();
+    var owner = !!(t && session && t.user_id === session.user_id);
+    $("sumRow").hidden = !t || !owner;
+    $("sumNote").hidden = !t || owner;
+    setMsg("sumMsg", "");
+  }
+  function sumFileName(t) {
+    var base = String(t.name || t.title || "trip").replace(/[^\w\- ]+/g, " ").trim().replace(/\s+/g, "-").slice(0, 60) || "trip";
+    return base + "-summary.html";
+  }
+  function sumTime(v) {
+    var m = typeof v === "string" && v.match(/(\d{2}):(\d{2})/);
+    if (!m) return "";
+    var h = parseInt(m[1], 10), ap = h >= 12 ? "PM" : "AM";
+    return ((h % 12) || 12) + ":" + m[2] + " " + ap;
+  }
+  var SUM_GUIDE = { missed_flight: "If you miss a flight", hotel_problem: "If there's a problem with your stay",
+    missed_train_bus: "If you miss a train or bus", lost_connection: "If you lose your connection" };
+  function sumHtml(p) {
+    var trip = p.trip || {}, h = [];
+    var title = trip.name || "Trip summary";
+    h.push("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + esc(title) + "</title>"
+      + "<style>body{font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#0D1B2A;max-width:760px;margin:0 auto;padding:24px 16px}"
+      + "h1{font-size:26px;margin:0 0 4px}h2{font-size:18px;margin:28px 0 8px;border-bottom:1px solid #d5dde8;padding-bottom:4px}h3{font-size:15px;margin:16px 0 4px}"
+      + ".sub{color:#4A6080;margin:0}.box{border:1px solid #d5dde8;border-radius:10px;padding:10px 12px;margin:8px 0;break-inside:avoid}"
+      + ".muted{color:#4A6080;font-size:13px}ul{margin:4px 0 0 18px;padding:0}.t{display:inline-block;min-width:74px;font-weight:600}"
+      + "@media print{body{padding:0}a{color:inherit}}</style></head><body>");
+    h.push("<h1>" + esc(title) + "</h1>");
+    var sub = [trip.destination, trip.start_date || trip.end_date ? fmtDay(trip.start_date) + " – " + fmtDay(trip.end_date) : null].filter(Boolean);
+    if (sub.length) h.push('<p class="sub">' + esc(sub.join(" · ")) + "</p>");
+    h.push('<p class="muted">Saved from TravelOS on ' + esc(new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })) + ". Things may have changed since then.</p>");
+    var nx = p.what_is_next;
+    if (nx) {
+      h.push("<h2>Coming up next</h2><div class=\"box\"><strong>" + esc(nx.title || "") + "</strong><br>"
+        + esc([fmtDay(nx.date), sumTime(nx.time), nx.location].filter(Boolean).join(" · "))
+        + (nx.confirmation_number ? "<br>Confirmation: " + esc(nx.confirmation_number) : "") + "</div>");
+    }
+    var days = p.itinerary && Array.isArray(p.itinerary.days) ? p.itinerary.days : [];
+    if (days.length) {
+      h.push("<h2>Plan</h2>");
+      days.forEach(function (d) {
+        h.push("<h3>" + esc(d.date ? fmtDay(d.date) : "Day " + (d.day_number || "")) + "</h3>");
+        (Array.isArray(d.activities) ? d.activities : []).forEach(function (a) {
+          h.push("<div><span class=\"t\">" + esc(sumTime(a.time) || "") + "</span>" + esc(a.name || "")
+            + (a.location ? " <span class=\"muted\">· " + esc(a.location) + "</span>" : "")
+            + (a.notes ? "<div class=\"muted\" style=\"margin-left:78px\">" + esc(a.notes) + "</div>" : "") + "</div>");
+        });
+      });
+    }
+    var res = Array.isArray(p.reservations) ? p.reservations : [];
+    if (res.length) {
+      h.push("<h2>Reservations</h2>");
+      res.forEach(function (r) {
+        var when1 = [fmtDay(r.start_date), sumTime(r.start_time)].filter(Boolean).join(" ");
+        var when2 = [fmtDay(r.end_date), sumTime(r.end_time)].filter(Boolean).join(" ");
+        var place = [r.location_name, r.address, r.city, r.country].filter(Boolean).join(", ");
+        h.push("<div class=\"box\"><strong>" + esc(r.provider_name || String(r.reservation_type || "Reservation").toLowerCase()) + "</strong>"
+          + (r.reservation_type ? " <span class=\"muted\">" + esc(String(r.reservation_type).toLowerCase().replace(/_/g, " ")) + "</span>" : "")
+          + (r.confirmation_number ? "<br>Confirmation: <strong>" + esc(r.confirmation_number) + "</strong>" : "")
+          + (when1 || when2 ? "<br>" + esc(when1 + (when2 ? " to " + when2 : "")) : "")
+          + (place ? "<br>" + esc(place) : "")
+          + (r.notes ? "<br><span class=\"muted\">" + esc(r.notes) + "</span>" : "") + "</div>");
+      });
+    }
+    var contacts = Array.isArray(p.important_contacts) ? p.important_contacts : [];
+    if (contacts.length) {
+      h.push("<h2>Important contacts and notes</h2>");
+      contacts.forEach(function (c) {
+        h.push("<div class=\"box\"><strong>" + esc(c.title || c.contact_name || "Contact") + "</strong>"
+          + [c.contact_name, c.organization, c.phone, c.email, c.address].filter(Boolean).map(function (x) { return "<br>" + esc(x); }).join("")
+          + (c.notes ? "<br><span class=\"muted\">" + esc(c.notes) + "</span>" : "") + "</div>");
+      });
+    }
+    var g = p.disruption_guidance && typeof p.disruption_guidance === "object" ? p.disruption_guidance : null;
+    if (g) {
+      h.push("<h2>If something goes wrong</h2>");
+      Object.keys(SUM_GUIDE).forEach(function (k) {
+        if (!Array.isArray(g[k]) || !g[k].length) return;
+        h.push("<h3>" + esc(SUM_GUIDE[k]) + "</h3><ul>" + g[k].map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>");
+      });
+    }
+    if (!days.length && !res.length && !contacts.length) h.push("<p>This trip doesn't have any plans, reservations or contacts yet.</p>");
+    h.push("</body></html>");
+    return h.join("");
+  }
+  $("sumDl").addEventListener("click", async function () {
+    var t = currentTrip();
+    if (!t || sum.busy) return;
+    var tripId = t.id, btn = this;
+    sum.busy = true;
+    btn.disabled = true;
+    setMsg("sumMsg", "Getting your summary ready…");
+    var r;
+    try { r = await fnPost("generate-offline-pack", { trip_id: tripId }); }
+    catch (e) { r = null; }
+    finally { sum.busy = false; btn.disabled = false; }
+    if ((currentTrip() || {}).id !== tripId) return;
+    if (!r || !r.ok || !r.data || !r.data.pack_data) {
+      setMsg("sumMsg", wave6Msg(r, "Only the trip's owner can download its summary for now.", "The summary couldn't be made right now. Try again in a moment."), true);
+      loadDerived();
+      return;
+    }
+    var url = URL.createObjectURL(new Blob([sumHtml(r.data.pack_data)], { type: "text/html;charset=utf-8" }));
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = sumFileName(t);
+    a.hidden = true;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+    setMsg("sumMsg", "Downloaded. Open it in your browser to read or print it offline.");
+    loadDerived();
+  });
+
+  function wave6OnTripChange() {
+    safeOnTripChange();
+    sumSync();
+    loadAgree();
+  }
 
   // ── boot ───────────────────────────────────────────────────
   // ADDED 2026-09-24: People & invite links (parity with mobile sharing).
