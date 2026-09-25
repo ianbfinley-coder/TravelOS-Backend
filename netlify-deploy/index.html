@@ -260,6 +260,27 @@
   .bar .fill.bad { background: var(--bad); }
   .bar .num { text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
+  /* ── toast (Saved · Undo) ─────────────────────────────────── */
+  .toast {
+    position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    max-width: 420px; margin: 0 auto; z-index: 50;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 12px 10px 16px; border-radius: 14px;
+    background: var(--ink); color: var(--ground); box-shadow: var(--shadow); font-size: 14px;
+  }
+  .toast span { flex: 1 1 auto; min-width: 0; }
+  .toast .sep { flex: 0 0 auto; opacity: .6; }
+  .toast button { background: transparent; color: inherit; border: 1px solid currentColor; }
+
+  /* ── documents and alerts ─────────────────────────────────── */
+  .res .acts { flex-wrap: wrap; }
+  .alert-row { border-left: 3px solid var(--line); }
+  .alert-row.sev-bad { border-left-color: var(--bad); }
+  .alert-row.sev-warn { border-left-color: var(--warn); }
+  .alert-row.sev-acc { border-left-color: var(--accent); }
+  .alert-row p { margin: 6px 0 0; font-size: 14px; color: var(--ink-2); word-break: break-word; }
+  input[type="file"] { padding: 9px 12px; }
+
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 
@@ -524,7 +545,7 @@
         <summary class="note" style="cursor:pointer">History</summary>
         <div style="margin-top:8px">
           <div id="histList"></div>
-          <p class="note tiny" style="margin:10px 0 0">Restoring puts the itinerary back the way it was in that version. Anything added or changed since then, including edits made here with Add item, Edit or Remove, is replaced.</p>
+          <p class="note tiny" style="margin:10px 0 0">Restoring puts the itinerary back the way it was in that version. Anything added or changed since then is replaced.</p>
           <p class="note" id="histMsg" style="margin:8px 0 0" hidden></p>
         </div>
       </details>
@@ -541,6 +562,21 @@
       <p class="note" id="healthProgress" style="margin:0 0 12px" hidden></p>
       <p class="note" id="healthMsg" style="margin:0 0 12px" hidden></p>
       <div id="healthBody"><p class="note" style="margin:0">Loading&hellip;</p></div>
+    </div>
+  </section>
+
+  <!-- ── alerts (generate-alert) ───────────────────────────── -->
+  <section class="panel" id="alertPanel" hidden style="margin-top:16px">
+    <header>
+      <h2>Alerts</h2>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span id="alertCount" class="chip mute">&mdash;</span>
+        <button id="alertRefresh" class="ghost tiny" type="button">Refresh</button>
+      </div>
+    </header>
+    <div class="body">
+      <p class="note" id="alertMsg" style="margin:0 0 12px" hidden></p>
+      <div id="alertList"><p class="note" style="margin:0">Loading&hellip;</p></div>
     </div>
   </section>
 
@@ -601,6 +637,77 @@
         <p class="note tiny" style="margin:6px 0 0">Anyone with this link can join as this person, so send it only to them. It's shown once; use New link to replace it.</p>
       </div>
       <p class="note" id="peopleMsg" style="margin:8px 0 0" hidden></p>
+    </div>
+  </section>
+
+  <!-- ── documents (document-vault-api) ────────────────────── -->
+  <section class="panel" id="docPanel" hidden style="margin-top:16px">
+    <header>
+      <h2>Documents</h2>
+      <span id="docCount" class="chip mute">&mdash;</span>
+    </header>
+    <div class="body">
+      <p class="note" style="margin:0 0 12px">Passports, tickets, insurance and anything else you want on hand. Only you can see what you add here.</p>
+      <div id="docAddBox">
+        <div class="row">
+          <div><label class="f" for="docFile">Add a file</label><input id="docFile" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif"></div>
+          <div class="shrink" style="width:180px"><label class="f" for="docType">What is it?</label>
+            <select id="docType">
+              <option value="OTHER">Something else</option>
+              <option value="PASSPORT">Passport</option>
+              <option value="GOVERNMENT_ID">ID card</option>
+              <option value="DRIVER_LICENSE">Driver's license</option>
+              <option value="VISA_ENTRY_DOCUMENT">Visa or entry document</option>
+              <option value="TRAVEL_AUTHORIZATION">Travel authorization</option>
+              <option value="TRAVEL_INSURANCE">Travel insurance</option>
+              <option value="FLIGHT_DOCUMENT">Flight</option>
+              <option value="BOARDING_PASS">Boarding pass</option>
+              <option value="HOTEL_DOCUMENT">Hotel</option>
+              <option value="RENTAL_CAR_DOCUMENT">Rental car</option>
+              <option value="TRAIN_DOCUMENT">Train</option>
+              <option value="BUS_DOCUMENT">Bus</option>
+              <option value="TOUR_ACTIVITY_DOCUMENT">Tour or activity</option>
+              <option value="CRUISE_DOCUMENT">Cruise</option>
+            </select>
+          </div>
+          <div class="shrink"><button id="docUpload" type="button">Upload</button></div>
+        </div>
+        <p class="note tiny" style="margin:6px 0 0">PDFs and photos (JPEG, PNG, WebP, HEIC) up to 20 MB.</p>
+      </div>
+      <p class="note" id="docOwnerNote" style="margin:0" hidden>Only the person who created this trip can add documents and notes to it right now.</p>
+      <p class="note" id="docMsg" style="margin:8px 0 0" hidden></p>
+      <div id="docList" style="margin-top:14px"></div>
+
+      <div class="subhead" style="margin-top:22px">Important info</div>
+      <div id="infoList"></div>
+      <div id="infoAddBox" style="margin-top:12px">
+        <button id="toggleInfoAdd" class="ghost tiny" type="button">Add a note</button>
+        <div id="infoForm" hidden style="margin-top:10px">
+          <div class="grid2">
+            <div><label class="f" for="infoTitle">Title</label><input id="infoTitle" maxlength="200" placeholder="Hotel front desk"></div>
+            <div><label class="f" for="infoType">Kind</label>
+              <select id="infoType">
+                <option value="CUSTOM">Note</option>
+                <option value="EMERGENCY_CONTACT">Emergency contact</option>
+                <option value="TRAVEL_CONTACT">Travel contact</option>
+                <option value="HOTEL_CONTACT">Hotel contact</option>
+                <option value="AIRLINE_CONTACT">Airline contact</option>
+                <option value="RENTAL_CAR_CONTACT">Rental car contact</option>
+                <option value="TOUR_CONTACT">Tour contact</option>
+                <option value="INSURANCE_INFO">Insurance</option>
+                <option value="LOCATION_INFO">Place or address</option>
+              </select>
+            </div>
+            <div><label class="f" for="infoPhone">Phone (optional)</label><input id="infoPhone" type="tel" maxlength="40" placeholder="+351 21 000 0000"></div>
+            <div style="grid-column:1/-1"><label class="f" for="infoText">Details (optional)</label><textarea id="infoText" rows="2" maxlength="2000" placeholder="Booking reference, address, anything you'll want to find fast."></textarea></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div class="shrink"><button id="saveInfo" type="button">Save note</button></div>
+            <div class="shrink"><button id="cancelInfo" class="ghost" type="button">Cancel</button></div>
+          </div>
+        </div>
+      </div>
+      <p class="note" id="infoMsg" style="margin:8px 0 0" hidden></p>
     </div>
   </section>
 
@@ -854,6 +961,8 @@
   </div>
 
 </div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden><span id="toastText"></span><i class="sep" id="toastSep" aria-hidden="true">&middot;</i><button id="toastUndo" class="tiny" type="button">Undo</button></div>
 
 <script>
 (function () {
@@ -1293,6 +1402,9 @@
     $("fxPanel").hidden = true;
     $("expPanel").hidden = true;
     $("peoplePanel").hidden = true;
+    $("docPanel").hidden = true;
+    $("alertPanel").hidden = true;
+    hideToast();
     $("workArea").hidden = true;
     selectedTripId = null;
   });
@@ -1317,7 +1429,7 @@
   var selectedTripId = null;
 
   async function loadTrips(selectId) {
-    var r = await call("GET", "/rest/v1/trips?select=id,name,title,destination,start_date,end_date,status,primary_tz,base_currency&order=start_date.desc");
+    var r = await call("GET", "/rest/v1/trips?select=id,user_id,name,title,destination,start_date,end_date,status,primary_tz,base_currency&order=start_date.desc");
     if (!r.ok) { return; }
     trips = r.data || [];
     if (selectId) {
@@ -1333,6 +1445,8 @@
     $("aiPanel").hidden = trips.length === 0;
     $("expPanel").hidden = trips.length === 0;
     $("peoplePanel").hidden = trips.length === 0;
+    $("docPanel").hidden = trips.length === 0;
+    $("alertPanel").hidden = trips.length === 0;
     fxInit();
     if (trips.length) onTripChange(); else openTripEditor(true);
   }
@@ -1374,6 +1488,8 @@
     fxOnTripChange();
     planOnTripChange();
     loadExpenses().then(loadPeople, loadPeople);
+    loadDocs();
+    loadAlerts();
     $("tripForm").hidden = true;
   }
 
@@ -1769,17 +1885,98 @@
   });
   $("cancelIt").addEventListener("click", function () { $("itForm").hidden = true; editingItem = null; });
 
+  // CHANGED 2026-09-25 (web wave 3): Add item / Edit / Remove save through the
+  // versioned RPCs (itinerary_add_items, itinerary_update_item,
+  // itinerary_delete_items), so every web edit becomes an itinerary version
+  // that History can restore and the toast can undo. The RPCs take local
+  // 'HH:MM' times in the trip's time zone and work out start_time/end_time
+  // themselves. They don't take country code, outdoors or fixed time, so
+  // when one of those changes it's written to the item right after the
+  // versioned save. If an RPC isn't deployed yet (HTTP 404, PGRST202) the
+  // old direct itinerary_items write runs instead, unversioned.
+  var itTimer = { t: null };
+  function rpcMissing(r) {
+    return !!(r && r.status === 404 && (!r.data || !r.data.code || r.data.code === "PGRST202"));
+  }
+  function hhmm(v) { return v ? String(v).slice(0, 5) : null; }
+  function itemMsg(r, verb) {
+    var c = versionCode(r);
+    if (c === "NOT_FOUND") return "That item isn't on the itinerary anymore. The list has been refreshed.";
+    if (c === "BAD_ITEM" || c === "BAD_ITEMS") return "Something in this item couldn't be saved. Check the day and times, then try again.";
+    if (VERSION_MSG[c] && c !== "STALE") return VERSION_MSG[c];
+    return "The item couldn't be " + verb + ". Nothing was changed. Try again in a moment.";
+  }
+  function itFormValues() {
+    return {
+      title: $("iTitle").value.trim(),
+      type: $("iType").value || "activity",
+      date: $("iDate").value || null,
+      time: hhmm($("iStart").value),
+      end_time: hhmm($("iEnd").value),
+      location: $("iLoc").value.trim() || null,
+      must_do: $("iMust").checked,
+      country_code: $("iCountry").value.trim().toUpperCase() || null,
+      outdoor: $("iOutdoor").checked,
+      fixed: $("iFixed").checked
+    };
+  }
+  function itItemValues(item) {
+    return {
+      title: item.title || "",
+      type: item.type || "activity",
+      date: item.date || null,
+      time: item.start_time ? clock(item.start_time) : null,
+      end_time: item.end_time ? clock(item.end_time) : null,
+      location: item.location || null,
+      must_do: !!item.must_do,
+      country_code: item.country_code || null,
+      outdoor: !!item.outdoor,
+      fixed: !!item.fixed
+    };
+  }
+  // Columns the versioned RPCs don't take, written straight to the item.
+  function itExtras(v, prev) {
+    var x = {}, any = false;
+    ["country_code", "outdoor", "fixed"].forEach(function (k) {
+      if (v[k] !== prev[k]) { x[k] = v[k]; any = true; }
+    });
+    return any ? x : null;
+  }
+  // The old direct write, kept for when the RPCs aren't deployed yet.
+  function itRestRow(t, v) {
+    return {
+      trip_id: t.id, title: v.title, type: v.type, date: v.date,
+      start_time: isoAt(v.date, v.time), end_time: isoAt(v.date, v.end_time),
+      location: v.location, country_code: v.country_code,
+      outdoor: v.outdoor, fixed: v.fixed, must_do: v.must_do
+    };
+  }
+  function itSaved(text, versionId) {
+    $("itForm").hidden = true;
+    editingItem = null;
+    showToast(text, versionId || null);
+    loadItinerary();
+    loadDerived();
+  }
+
   $("itList").addEventListener("click", async function (e) {
     var btn = e.target.closest("button[data-act]");
-    if (!btn) return;
+    if (!btn || btn.disabled) return;
     var id = btn.closest(".it").getAttribute("data-id");
     var item = itinerary.filter(function (i) { return i.id === id; })[0];
     if (!item) return;
 
     if (btn.getAttribute("data-act") === "edit") {
       editingItem = id;
+      var type = item.type || "activity";
+      var sel = $("iType");
+      if (!Array.prototype.some.call(sel.options, function (o) { return o.value === type; })) {
+        var o = document.createElement("option");
+        o.value = type; o.textContent = type;
+        sel.appendChild(o);
+      }
       $("iTitle").value = item.title || "";
-      $("iType").value = item.type || "activity";
+      sel.value = type;
       $("iDate").value = item.date || "";
       $("iCountry").value = item.country_code || "";
       $("iStart").value = item.start_time ? clock(item.start_time) : "";
@@ -1795,45 +1992,154 @@
       return;
     }
 
-    if (!window.confirm("Remove “" + (item.title || "this item") + "” from the itinerary?")) return;
-    var r = await call("DELETE", "/rest/v1/itinerary_items?id=eq." + encodeURIComponent(id));
-    if (!r.ok) { window.alert("Could not remove it. " + (r.detail || ("HTTP " + r.status))); return; }
-    loadItinerary();
+    if (!armButton(btn, "Tap again to remove", itTimer)) return;
+    clearTimeout(itTimer.t);
+    btn.disabled = true;
+    var r;
+    try {
+      r = await rpc("itinerary_delete_items", { p_item_ids: [id], p_version_name: "Removed items" });
+      if (rpcMissing(r)) {
+        r = await call("DELETE", "/rest/v1/itinerary_items?id=eq." + encodeURIComponent(id));
+        if (r.ok) { itSaved("Removed", null); return; }
+      } else if (rpcOk(r)) {
+        itSaved("Removed", r.data.new_version_id);
+        return;
+      }
+    } catch (err) {
+      btn.disabled = false;
+      disarmButton(btn);
+      showToast(NETWORK_HINT, null);
+      return;
+    }
+    btn.disabled = false;
+    disarmButton(btn);
+    showToast(itemMsg(r, "removed"), null);
+    if (versionCode(r) === "NOT_FOUND") loadItinerary();
   });
 
   $("itForm").addEventListener("submit", async function (e) {
     e.preventDefault();
     var t = currentTrip();
     if (!t) return;
-    var date = $("iDate").value;
-    var row = {
-      trip_id: t.id,
-      title: $("iTitle").value.trim(),
-      type: $("iType").value,
-      date: date || null,
-      start_time: isoAt(date, $("iStart").value),
-      end_time: isoAt(date, $("iEnd").value),
-      location: $("iLoc").value.trim() || null,
-      country_code: ($("iCountry").value.trim().toUpperCase() || null),
-      outdoor: $("iOutdoor").checked,
-      fixed: $("iFixed").checked,
-      must_do: $("iMust").checked
-    };
+    var v = itFormValues();
+    var errEl = $("itErr");
+    errEl.hidden = true;
+    if (!v.title) { errEl.textContent = "Give the item a name."; errEl.hidden = false; return; }
+    if (!v.date) { errEl.textContent = "Pick the day it happens."; errEl.hidden = false; return; }
+    if (v.end_time && !v.time) { errEl.textContent = "Add a start time too, or clear the end time."; errEl.hidden = false; return; }
+    var editId = editingItem;
+    var prev = null;
+    if (editId) {
+      var item = itinerary.filter(function (i) { return i.id === editId; })[0];
+      if (!item) { errEl.textContent = "That item isn't on the itinerary anymore. The list has been refreshed."; errEl.hidden = false; loadItinerary(); return; }
+      prev = itItemValues(item);
+    } else {
+      prev = { country_code: null, outdoor: false, fixed: false };
+    }
+    var extras = itExtras(v, prev);
     $("saveIt").disabled = true;
-    var r = editingItem
-      ? await call("PATCH", "/rest/v1/itinerary_items?id=eq." + encodeURIComponent(editingItem),
-          { body: row, headers: { Prefer: "return=representation" } })
-      : await call("POST", "/rest/v1/itinerary_items",
-          { body: row, headers: { Prefer: "return=representation" } });
-    $("saveIt").disabled = false;
-    if (!r.ok) {
-      $("itErr").textContent = "Could not save the item. " + (r.detail || ("HTTP " + r.status));
-      $("itErr").hidden = false;
+    try {
+      var r, itemId = editId, versionId = null, usedRest = false;
+      if (editId) {
+        var patch = {}, changed = false;
+        ["title", "type", "date", "time", "end_time", "location", "must_do"].forEach(function (k) {
+          if (v[k] !== prev[k]) { patch[k] = v[k]; changed = true; }
+        });
+        // A new day with the same clock time still moves the item, so the
+        // times travel with the date.
+        if ("date" in patch && v.time) { patch.time = v.time; patch.end_time = v.end_time; }
+        if (!changed && !extras) { $("itForm").hidden = true; editingItem = null; return; }
+        if (changed) {
+          r = await rpc("itinerary_update_item", { p_item_id: editId, p_patch: patch, p_version_name: "Edited item" });
+          if (rpcMissing(r)) {
+            usedRest = true;
+            r = await call("PATCH", "/rest/v1/itinerary_items?id=eq." + encodeURIComponent(editId),
+              { body: itRestRow(t, v), headers: { Prefer: "return=minimal" } });
+          } else if (rpcOk(r)) {
+            versionId = r.data.new_version_id || null;
+          }
+        }
+      } else {
+        var add = { title: v.title, date: v.date, type: v.type, must_do: v.must_do };
+        if (v.time) add.time = v.time;
+        if (v.time && v.end_time) add.end_time = v.end_time;
+        if (v.location) add.location = v.location;
+        r = await rpc("itinerary_add_items", { p_trip_id: t.id, p_items: [add], p_version_name: "Added item" });
+        if (rpcMissing(r)) {
+          usedRest = true;
+          extras = null;
+          r = await call("POST", "/rest/v1/itinerary_items",
+            { body: itRestRow(t, v), headers: { Prefer: "return=minimal" } });
+        } else if (rpcOk(r)) {
+          versionId = r.data.new_version_id || null;
+          itemId = Array.isArray(r.data.item_ids) ? r.data.item_ids[0] : null;
+        }
+      }
+      if (r && !(usedRest ? r.ok : rpcOk(r))) {
+        errEl.textContent = itemMsg(r, "saved");
+        errEl.hidden = false;
+        if (versionCode(r) === "NOT_FOUND") loadItinerary();
+        return;
+      }
+      if (extras && itemId && !(usedRest && editId)) {
+        var x = await call("PATCH", "/rest/v1/itinerary_items?id=eq." + encodeURIComponent(itemId),
+          { body: extras, headers: { Prefer: "return=minimal" } });
+        if (!x.ok) {
+          $("itForm").hidden = true;
+          editingItem = null;
+          showToast("Saved, but the country code, outdoors and fixed-time settings didn't stick. Edit the item to try again.", versionId);
+          loadItinerary();
+          loadDerived();
+          return;
+        }
+      }
+      itSaved("Saved", versionId);
+    } catch (err) {
+      errEl.textContent = NETWORK_HINT;
+      errEl.hidden = false;
+    } finally {
+      $("saveIt").disabled = false;
+    }
+  });
+
+  // ── toast: "Saved · Undo" ───────────────────────────────────
+  var toast = { t: null, versionId: null };
+  function showToast(text, versionId) {
+    clearTimeout(toast.t);
+    toast.versionId = versionId || null;
+    $("toastText").textContent = text;
+    $("toastUndo").hidden = !toast.versionId;
+    $("toastSep").hidden = !toast.versionId;
+    $("toastUndo").disabled = false;
+    $("toast").hidden = false;
+    toast.t = setTimeout(hideToast, toast.versionId ? 10000 : 6000);
+  }
+  function hideToast() {
+    clearTimeout(toast.t);
+    toast.versionId = null;
+    var el = $("toast");
+    if (el) el.hidden = true;
+  }
+  $("toastUndo").addEventListener("click", async function () {
+    var vid = toast.versionId, btn = this;
+    if (!vid || btn.disabled) return;
+    btn.disabled = true;
+    clearTimeout(toast.t);
+    var r;
+    try {
+      r = await rpc("itinerary_undo_change", { p_version_id: vid });
+    } catch (e) {
+      showToast(NETWORK_HINT, null);
       return;
     }
-    $("itForm").hidden = true;
-    editingItem = null;
+    if (!rpcOk(r)) {
+      showToast(versionMsg(r), null);
+      loadItinerary();
+      return;
+    }
+    showToast("Undone", null);
     loadItinerary();
+    loadDerived();
   });
 
   // ── currency converter (fx-rates backend, flag fx_converter) ──
@@ -2962,10 +3268,9 @@
   // History lists itinerary_versions (RLS: any trip member can read). Restore
   // and Undo go through the itinerary_restore_version / itinerary_undo_change
   // RPCs, which check the caller's editing role and two-step rule themselves
-  // and answer { ok:false, code } instead of an HTTP error. Web edits made
-  // with Add item / Edit / Remove write itinerary_items directly and do NOT
-  // create a version, so a restore replaces them too (the History note says
-  // so).
+  // and answer { ok:false, code } instead of an HTTP error. Since wave 3,
+  // web edits made with Add item / Edit / Remove go through the versioned
+  // RPCs too (see the itinerary section), so each one is a version here.
   //
   // The planner calls generate-itinerary, which stores nothing and returns a
   // draft plan. Add to my trip sends the dated activities to
@@ -3246,7 +3551,7 @@
 
   function renderHistory() {
     if (!hist.rows.length) {
-      $("histList").innerHTML = '<p class="note" style="margin:0">No saved versions yet. A version is saved each time the AI planner, the copilot or a restore changes the itinerary. Changes made here with Add item, Edit or Remove aren\'t saved as versions.</p>';
+      $("histList").innerHTML = '<p class="note" style="margin:0">No saved versions yet. A version is saved each time the itinerary changes, whether you edit it here, the AI planner or copilot changes it, or you restore an earlier version.</p>';
       return;
     }
     var canEdit = myRole() !== "viewer";
@@ -3584,6 +3889,386 @@
       loadItinerary();
       loadDerived();
     }
+  });
+
+  // ADDED 2026-09-25 (web wave 3): Documents and Alerts.
+  //
+  // Documents use document-vault-api (verify_jwt on). The vault is private:
+  // every row belongs to the person who added it, and the function has no
+  // trip roles. It lists with GET ?action=list&trip_id=, which returns this
+  // trip's documents, the caller's trip-independent TRAVELER documents and
+  // the trip's important_information notes. Uploading is two steps: POST
+  // { action: "upload_url", trip_id, document_type, document_name,
+  // file_type, file_size_bytes } creates the row and returns a signed
+  // Storage upload URL, then the file is PUT there the way supabase-js
+  // uploadToSignedUrl does it (multipart, cacheControl + the file). Opening
+  // uses GET ?action=get&document_id=, which returns a one-hour signed
+  // download_url. Deleting is DELETE { document_id } or { info_id }. Notes
+  // are POST { action: "create_info", trip_id, information_type, title, ... }.
+  // upload_url and create_info only accept a trip whose trips.user_id is the
+  // caller, so other trip members can read their own vault here but can't
+  // add to it; the page says so instead of letting the call fail.
+  //
+  // Alerts use generate-alert, the only one of the alert functions that
+  // lists travel_alerts for a user and also lets that user act on them:
+  // GET ?trip_id=&status=ACTIVE lists, POST { action: "acknowledge" } and
+  // POST { action: "update_status", status: "DISMISSED" } act. A POST without
+  // an action GENERATES an alert (AI, billed), so every POST here names one.
+  // It also checks trips.user_id, and alerts are always attributed to the
+  // trip's creator, so other members get a note instead of a list.
+  function isTripOwner(t) { return !!(t && session && t.user_id && t.user_id === session.user_id); }
+  function fmtBytes(n) {
+    n = Number(n) || 0;
+    if (n >= 1048576) return (Math.round(n / 104857.6) / 10) + " MB";
+    if (n >= 1024) return Math.round(n / 1024) + " KB";
+    return n + " bytes";
+  }
+  function fmtDay(iso) {
+    if (!iso) return "";
+    var d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso + "T12:00:00Z" : iso);
+    if (isNaN(d)) return "";
+    return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  // ── documents ───────────────────────────────────────────────
+  var docs = { seq: 0, tripId: null, busy: false };
+  var docTimer = { t: null };
+  var DOC_MAX = 20 * 1024 * 1024;
+  var DOC_EXT_MIME = { pdf: "application/pdf", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+    webp: "image/webp", heic: "image/heic", heif: "image/heif" };
+  var DOC_MIMES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+  var DOC_TYPE_LABEL = { PASSPORT: "Passport", GOVERNMENT_ID: "ID card", DRIVER_LICENSE: "Driver's license",
+    VISA_ENTRY_DOCUMENT: "Visa or entry document", TRAVEL_INSURANCE: "Travel insurance", FLIGHT_DOCUMENT: "Flight",
+    BOARDING_PASS: "Boarding pass", HOTEL_DOCUMENT: "Hotel", RENTAL_CAR_DOCUMENT: "Rental car", TRAIN_DOCUMENT: "Train",
+    BUS_DOCUMENT: "Bus", TOUR_ACTIVITY_DOCUMENT: "Tour or activity", CRUISE_DOCUMENT: "Cruise",
+    TRAVEL_AUTHORIZATION: "Travel authorization", OTHER: "Document" };
+  var INFO_TYPE_LABEL = { EMERGENCY_CONTACT: "Emergency contact", TRAVEL_CONTACT: "Travel contact",
+    LOCATION_INFO: "Place or address", INSURANCE_INFO: "Insurance", AIRLINE_CONTACT: "Airline contact",
+    HOTEL_CONTACT: "Hotel contact", RENTAL_CAR_CONTACT: "Rental car contact", TOUR_CONTACT: "Tour contact", CUSTOM: "Note" };
+  function vaultGet(qs) { return call("GET", "/functions/v1/document-vault-api?" + qs); }
+  function vaultSend(method, body) { return call(method, "/functions/v1/document-vault-api", { body: body }); }
+  function vaultFail(r, what) {
+    if (r && r.status === 401) return VERSION_MSG.UNAUTHORIZED;
+    if (r && r.status === 404 && /trip/i.test(r.detail || "")) return "Only the person who created this trip can add " + what + " to it right now.";
+    if (r && (r.status === 403 || r.status === 404)) return "That's no longer in your documents. The list has been refreshed.";
+    return "That didn't work, and nothing was changed. Try again in a moment.";
+  }
+  function fileMime(f) {
+    var t = (f.type || "").toLowerCase();
+    if (t === "image/jpg") t = "image/jpeg";
+    if (DOC_MIMES.indexOf(t) >= 0) return t;
+    var ext = (f.name.split(".").pop() || "").toLowerCase();
+    return DOC_EXT_MIME[ext] || null;
+  }
+
+  async function loadDocs() {
+    var t = currentTrip();
+    if (!t || !session) return;
+    var tripId = t.id, seq = ++docs.seq;
+    var owner = isTripOwner(t);
+    $("docAddBox").hidden = !owner;
+    $("infoAddBox").hidden = !owner;
+    $("docOwnerNote").hidden = owner;
+    if (docs.tripId !== tripId) {
+      docs.tripId = tripId;
+      setMsg("docMsg", ""); setMsg("infoMsg", "");
+      $("infoForm").hidden = true;
+      $("docFile").value = "";
+      $("docList").innerHTML = '<p class="note" style="margin:0">Loading&hellip;</p>';
+      $("infoList").innerHTML = "";
+      $("docCount").textContent = "—";
+      $("docCount").className = "chip mute";
+    }
+    var r;
+    try { r = await vaultGet("action=list&trip_id=" + encodeURIComponent(tripId)); }
+    catch (e) { if (seq === docs.seq) setMsg("docMsg", NETWORK_HINT, true); return; }
+    if (seq !== docs.seq || (currentTrip() || {}).id !== tripId) return;
+    if (!r.ok || !r.data || !Array.isArray(r.data.documents)) {
+      $("docList").innerHTML = "";
+      setMsg("docMsg", r.status === 401 ? VERSION_MSG.UNAUTHORIZED : "Your documents couldn't be loaded right now. Try again in a moment.", true);
+      return;
+    }
+    renderDocs(r.data);
+  }
+
+  function renderDocs(d) {
+    var tripDocs = d.documents || [];
+    var seen = {};
+    tripDocs.forEach(function (x) { seen[x.id] = true; });
+    var mine = (d.traveler_documents || []).filter(function (x) { return !seen[x.id]; });
+    var all = tripDocs.map(function (x) { return { doc: x, everywhere: false }; })
+      .concat(mine.map(function (x) { return { doc: x, everywhere: true }; }));
+    $("docCount").textContent = all.length + (all.length === 1 ? " file" : " files");
+    $("docCount").className = "chip " + (all.length ? "acc" : "mute");
+    $("docList").innerHTML = all.length ? all.map(function (e) {
+      var x = e.doc;
+      var chips = "";
+      if (x.status === "EXPIRED") chips += '<span class="chip bad">Expired</span>';
+      else if (x.status === "EXPIRING_SOON") chips += '<span class="chip warn">Expires soon</span>';
+      if (e.everywhere) chips += '<span class="chip mute">All trips</span>';
+      var facts = [
+        ["Type", DOC_TYPE_LABEL[x.document_type] || "Document"],
+        ["Added", fmtDay(x.created_at)],
+        ["Size", x.file_size_bytes ? fmtBytes(x.file_size_bytes) : ""],
+        ["Expires", fmtDay(x.expiration_date)]
+      ].filter(function (f) { return f[1]; });
+      return '<div class="res" data-doc="' + esc(x.id) + '"><div class="top"><span class="name" style="word-break:break-word;min-width:0">'
+        + esc(x.document_name || "Untitled document") + "</span>" + (chips ? '<span style="display:flex;gap:6px;flex-wrap:wrap">' + chips + "</span>" : "") + "</div>"
+        + "<dl>" + facts.map(function (f) { return "<div><dt>" + esc(f[0]) + "</dt><dd>" + esc(f[1]) + "</dd></div>"; }).join("") + "</dl>"
+        + '<div class="acts">' + (x.storage_path ? '<button class="tiny ghost" type="button" data-doc-open>Open</button>' : "")
+        + '<button class="tiny danger" type="button" data-doc-del>Delete</button></div></div>';
+    }).join("") : '<p class="note" style="margin:0">No documents yet.' + (isTripOwner(currentTrip()) ? " Add a boarding pass, booking confirmation or passport scan so it's here when you need it." : "") + "</p>";
+
+    var info = d.important_information || [];
+    $("infoList").innerHTML = info.length ? info.map(function (n) {
+      var bits = [n.contact_name, n.organization, n.phone, n.email, n.address, n.website].filter(Boolean);
+      return '<div class="res" data-info="' + esc(n.id) + '"><div class="top"><span class="name" style="word-break:break-word;min-width:0">' + esc(n.title || "Note") + "</span>"
+        + '<span class="chip mute">' + esc(INFO_TYPE_LABEL[n.information_type] || "Note") + "</span></div>"
+        + (bits.length ? '<p class="note" style="margin:6px 0 0;word-break:break-word">' + esc(bits.join(" · ")) + "</p>" : "")
+        + (n.information_text ? '<p class="note" style="margin:6px 0 0;white-space:pre-wrap;word-break:break-word">' + esc(n.information_text) + "</p>" : "")
+        + (n.notes ? '<p class="note" style="margin:6px 0 0;white-space:pre-wrap;word-break:break-word">' + esc(n.notes) + "</p>" : "")
+        + '<div class="acts"><button class="tiny danger" type="button" data-info-del>Delete</button></div></div>';
+    }).join("") : '<p class="note" style="margin:0">No notes yet. Keep phone numbers, addresses and booking references here.</p>';
+  }
+
+  $("docUpload").addEventListener("click", async function () {
+    var t = currentTrip();
+    if (!t || docs.busy) return;
+    setMsg("docMsg", "");
+    var f = $("docFile").files && $("docFile").files[0];
+    if (!f) { setMsg("docMsg", "Choose a file to upload first.", true); return; }
+    var mime = fileMime(f);
+    if (!mime) { setMsg("docMsg", "That kind of file can't be added. Use a PDF or a photo (JPEG, PNG, WebP or HEIC).", true); return; }
+    if (!f.size) { setMsg("docMsg", "That file is empty. Choose another one.", true); return; }
+    if (f.size > DOC_MAX) { setMsg("docMsg", "That file is " + fmtBytes(f.size) + ". Files can be up to 20 MB, so try a smaller scan or photo.", true); return; }
+    var tripId = t.id, btn = this;
+    docs.busy = true;
+    btn.disabled = true;
+    btn.textContent = "Uploading…";
+    var docId = null;
+    try {
+      var r = await vaultSend("POST", {
+        action: "upload_url", trip_id: tripId, document_type: $("docType").value || "OTHER",
+        document_name: f.name.slice(0, 200) || "Document", file_type: mime, file_size_bytes: f.size
+      });
+      if (!r.ok || !r.data || !r.data.upload_url) {
+        setMsg("docMsg", r.status === 400 && /20MB/i.test(r.detail || "") ? "That file is over 20 MB. Try a smaller scan or photo." : vaultFail(r, "documents"), true);
+        return;
+      }
+      docId = r.data.document_id;
+      var url = String(r.data.upload_url);
+      if (url.charAt(0) === "/") url = URL_BASE + "/storage/v1" + url;
+      var fd = new FormData();
+      fd.append("cacheControl", "3600");
+      fd.append("", f.type === mime ? f : new Blob([f], { type: mime }), f.name);
+      var up = await fetch(url, { method: "PUT", headers: { apikey: ANON, "x-upsert": "false" }, body: fd });
+      if (!up.ok) throw new Error("upload " + up.status);
+      docId = null;
+      $("docFile").value = "";
+      setMsg("docMsg", "Uploaded “" + f.name + "”.", false);
+    } catch (e) {
+      // The row was created before the file went up; remove it so a
+      // document with no file doesn't linger in the list.
+      if (docId) { try { await vaultSend("DELETE", { document_id: docId }); } catch (e2) { /* ignore */ } }
+      setMsg("docMsg", "The file didn't upload, so nothing was added. Check your connection and try again.", true);
+    } finally {
+      docs.busy = false;
+      btn.disabled = false;
+      btn.textContent = "Upload";
+      if ((currentTrip() || {}).id === tripId) loadDocs();
+    }
+  });
+
+  $("docList").addEventListener("click", async function (e) {
+    var btn = e.target.closest("button[data-doc-open],button[data-doc-del]");
+    if (!btn || btn.disabled) return;
+    var id = btn.closest("[data-doc]").getAttribute("data-doc");
+    setMsg("docMsg", "");
+    if (btn.hasAttribute("data-doc-open")) {
+      // Open the tab now, while this is still a click, so pop-up blockers
+      // allow it; the signed link is filled in once it arrives.
+      var w = null;
+      try { w = window.open("", "_blank"); if (w) w.opener = null; } catch (err) { w = null; }
+      btn.disabled = true;
+      var r;
+      try { r = await vaultGet("action=get&document_id=" + encodeURIComponent(id)); }
+      catch (err) { r = null; }
+      btn.disabled = false;
+      var link = r && r.ok && r.data && r.data.download_url;
+      if (link && !/^https:\/\//.test(String(link))) link = null;
+      if (!link) {
+        if (w) w.close();
+        setMsg("docMsg", r ? (r.status === 404 || r.status === 403 ? vaultFail(r, "") : "This file can't be opened right now. Try again in a moment.") : NETWORK_HINT, true);
+        if (r && (r.status === 404 || r.status === 403)) loadDocs();
+        return;
+      }
+      if (w) w.location.href = link;
+      else {
+        $("docMsg").innerHTML = 'Your browser blocked the new tab. <a href="' + esc(link) + '" target="_blank" rel="noopener">Open the file</a> (the link works for an hour).';
+        $("docMsg").className = "note";
+        $("docMsg").hidden = false;
+      }
+      return;
+    }
+    if (!armButton(btn, "Tap again to delete", docTimer)) return;
+    clearTimeout(docTimer.t);
+    btn.disabled = true;
+    var d;
+    try { d = await vaultSend("DELETE", { document_id: id }); }
+    catch (err) { btn.disabled = false; disarmButton(btn); setMsg("docMsg", NETWORK_HINT, true); return; }
+    if (!d.ok) {
+      btn.disabled = false;
+      disarmButton(btn);
+      setMsg("docMsg", d.status === 403 || d.status === 404 ? vaultFail(d, "") : "The document couldn't be deleted. It's still saved. Try again in a moment.", true);
+      if (d.status === 403 || d.status === 404) loadDocs();
+      return;
+    }
+    setMsg("docMsg", "Deleted.", false);
+    loadDocs();
+  });
+
+  $("toggleInfoAdd").addEventListener("click", function () {
+    var f = $("infoForm");
+    if (!f.hidden) { f.hidden = true; return; }
+    $("infoTitle").value = ""; $("infoPhone").value = ""; $("infoText").value = "";
+    $("infoType").value = "CUSTOM";
+    setMsg("infoMsg", "");
+    f.hidden = false;
+    $("infoTitle").focus();
+  });
+  $("cancelInfo").addEventListener("click", function () { $("infoForm").hidden = true; });
+  $("saveInfo").addEventListener("click", async function () {
+    var t = currentTrip();
+    if (!t) return;
+    var title = $("infoTitle").value.trim();
+    if (!title) { setMsg("infoMsg", "Give the note a title.", true); return; }
+    var body = { action: "create_info", trip_id: t.id, information_type: $("infoType").value || "CUSTOM", title: title.slice(0, 200) };
+    var phone = $("infoPhone").value.trim(), text = $("infoText").value.trim();
+    if (phone) body.phone = phone.slice(0, 40);
+    if (text) body.information_text = text.slice(0, 2000);
+    var btn = this;
+    btn.disabled = true;
+    var r;
+    try { r = await vaultSend("POST", body); }
+    catch (e) { btn.disabled = false; setMsg("infoMsg", NETWORK_HINT, true); return; }
+    btn.disabled = false;
+    if (!r.ok) { setMsg("infoMsg", vaultFail(r, "notes"), true); return; }
+    $("infoForm").hidden = true;
+    setMsg("infoMsg", "Saved.", false);
+    loadDocs();
+  });
+  $("infoList").addEventListener("click", async function (e) {
+    var btn = e.target.closest("button[data-info-del]");
+    if (!btn || btn.disabled) return;
+    if (!armButton(btn, "Tap again to delete", docTimer)) return;
+    clearTimeout(docTimer.t);
+    var id = btn.closest("[data-info]").getAttribute("data-info");
+    btn.disabled = true;
+    setMsg("infoMsg", "");
+    var r;
+    try { r = await vaultSend("DELETE", { info_id: id }); }
+    catch (err) { btn.disabled = false; disarmButton(btn); setMsg("infoMsg", NETWORK_HINT, true); return; }
+    if (!r.ok) {
+      btn.disabled = false;
+      disarmButton(btn);
+      setMsg("infoMsg", r.status === 403 || r.status === 404 ? vaultFail(r, "") : "The note couldn't be deleted. Try again in a moment.", true);
+      if (r.status === 403 || r.status === 404) loadDocs();
+      return;
+    }
+    setMsg("infoMsg", "Deleted.", false);
+    loadDocs();
+  });
+
+  // ── alerts ──────────────────────────────────────────────────
+  var alerts = { seq: 0, tripId: null };
+  var alertTimer = { t: null };
+  var ALERT_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
+  var ALERT_LABEL = { CRITICAL: "Urgent", HIGH: "Important", MEDIUM: "Worth a look", LOW: "Minor", INFO: "Good to know" };
+  var ALERT_CHIP = { CRITICAL: "bad", HIGH: "bad", MEDIUM: "warn", LOW: "acc", INFO: "mute" };
+
+  async function loadAlerts() {
+    var t = currentTrip();
+    if (!t || !session) return;
+    var tripId = t.id, seq = ++alerts.seq;
+    if (alerts.tripId !== tripId) {
+      alerts.tripId = tripId;
+      setMsg("alertMsg", "");
+      $("alertList").innerHTML = '<p class="note" style="margin:0">Loading&hellip;</p>';
+      $("alertCount").textContent = "—";
+      $("alertCount").className = "chip mute";
+    }
+    if (!isTripOwner(t)) {
+      $("alertRefresh").hidden = true;
+      $("alertList").innerHTML = '<p class="note" style="margin:0">Alerts for this trip, like flight changes and delays, go to the person who created it.</p>';
+      return;
+    }
+    $("alertRefresh").hidden = false;
+    var r;
+    try { r = await call("GET", "/functions/v1/generate-alert?trip_id=" + encodeURIComponent(tripId) + "&status=ACTIVE"); }
+    catch (e) { if (seq === alerts.seq) setMsg("alertMsg", NETWORK_HINT, true); return; }
+    if (seq !== alerts.seq || (currentTrip() || {}).id !== tripId) return;
+    if (!r.ok || !r.data || !Array.isArray(r.data.alerts)) {
+      $("alertList").innerHTML = "";
+      setMsg("alertMsg", r.status === 401 ? VERSION_MSG.UNAUTHORIZED : "Alerts couldn't be loaded right now. Try again in a moment.", true);
+      return;
+    }
+    setMsg("alertMsg", "");
+    renderAlerts(r.data.alerts);
+  }
+
+  function renderAlerts(list) {
+    list = list.filter(function (a) { return a && a.status === "ACTIVE"; }).sort(function (a, b) {
+      var pa = ALERT_ORDER[a.priority] != null ? ALERT_ORDER[a.priority] : 5;
+      var pb = ALERT_ORDER[b.priority] != null ? ALERT_ORDER[b.priority] : 5;
+      if (pa !== pb) return pa - pb;
+      return new Date(b.last_updated_at || b.created_at) - new Date(a.last_updated_at || a.created_at);
+    });
+    $("alertCount").textContent = list.length ? list.length + (list.length === 1 ? " alert" : " alerts") : "All clear";
+    var top = list.length ? ALERT_CHIP[list[0].priority] || "acc" : "ok";
+    $("alertCount").className = "chip " + (top === "mute" ? "acc" : top);
+    if (!list.length) {
+      $("alertList").innerHTML = '<p class="note" style="margin:0">No alerts right now. If something changes with your plans, like a flight delay or a gate change, it shows up here.</p>';
+      return;
+    }
+    $("alertList").innerHTML = list.map(function (a) {
+      var sev = ALERT_CHIP[a.priority] || "acc";
+      var chips = '<span class="chip ' + sev + '">' + esc(ALERT_LABEL[a.priority] || "Alert") + "</span>";
+      if (a.acknowledged_at) chips += '<span class="chip ok">Seen</span>';
+      return '<div class="res alert-row sev-' + sev + '" data-alert="' + esc(a.id) + '"><div class="top"><span class="name" style="word-break:break-word;min-width:0">'
+        + esc(a.title || "Travel alert") + '</span><span style="display:flex;gap:6px;flex-wrap:wrap">' + chips + "</span></div>"
+        + (a.summary ? "<p>" + esc(a.summary) + "</p>" : "")
+        + (a.explanation && a.explanation !== a.summary ? "<p>" + esc(a.explanation) + "</p>" : "")
+        + '<p class="tiny" style="color:var(--ink-3)">' + esc(when(a.last_updated_at || a.first_detected_at || a.created_at)) + "</p>"
+        + '<div class="acts">' + (a.acknowledged_at ? "" : '<button class="tiny" type="button" data-alert-ack>Got it</button>')
+        + '<button class="tiny ghost" type="button" data-alert-dismiss>Dismiss</button></div></div>';
+    }).join("");
+  }
+
+  $("alertRefresh").addEventListener("click", loadAlerts);
+  $("alertList").addEventListener("click", async function (e) {
+    var btn = e.target.closest("button[data-alert-ack],button[data-alert-dismiss]");
+    if (!btn || btn.disabled) return;
+    var id = btn.closest("[data-alert]").getAttribute("data-alert");
+    var ack = btn.hasAttribute("data-alert-ack");
+    if (!ack) {
+      if (!armButton(btn, "Tap again to dismiss", alertTimer)) return;
+      clearTimeout(alertTimer.t);
+    }
+    btn.disabled = true;
+    setMsg("alertMsg", "");
+    var body = ack ? { action: "acknowledge", alert_id: id } : { action: "update_status", alert_id: id, status: "DISMISSED" };
+    var r;
+    try { r = await call("POST", "/functions/v1/generate-alert", { body: body }); }
+    catch (err) { btn.disabled = false; if (!ack) disarmButton(btn); setMsg("alertMsg", NETWORK_HINT, true); return; }
+    if (!r.ok || !r.data || r.data.success !== true) {
+      btn.disabled = false;
+      if (!ack) disarmButton(btn);
+      setMsg("alertMsg", r.status === 404 ? "That alert is no longer active. The list has been refreshed."
+        : r.status === 401 ? VERSION_MSG.UNAUTHORIZED : "That didn't work. Try again in a moment.", true);
+      if (r.status === 404) loadAlerts();
+      return;
+    }
+    loadAlerts();
   });
 
   session = loadSession();
