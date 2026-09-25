@@ -294,6 +294,30 @@
   .alert-row p { margin: 6px 0 0; font-size: 14px; color: var(--ink-2); word-break: break-word; }
   input[type="file"] { padding: 9px 12px; }
 
+  /* ── packing, chat, polls (web wave 5) ───────────────────── */
+  .pk { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 0 12px; align-items: center;
+        padding: 9px 0; border-top: 1px solid var(--line-2); }
+  .pk:first-child { border-top: 0; }
+  .pk .what { min-width: 0; word-break: break-word; }
+  .pk.done .what b { color: var(--ink-3); text-decoration: line-through; font-weight: 500; }
+  .pk .what b { font-weight: 600; }
+  .pk .what i { font-style: normal; font-size: 13px; color: var(--ink-3); margin-left: 6px; }
+  .pk .box { width: 22px; height: 22px; min-height: 0; padding: 0; margin: 0; accent-color: var(--accent); cursor: pointer; }
+  .pk .box:disabled { cursor: default; }
+  .gc-who { font-size: 12px; color: var(--ink-3); margin: 0 4px 2px; }
+  .gc-who.mine { align-self: flex-end; }
+  .gc-row { display: flex; flex-direction: column; }
+  .poll { border: 1px solid var(--line-2); border-radius: 16px; padding: 12px 14px; background: var(--card-2); }
+  .poll + .poll { margin-top: 10px; }
+  .poll .q { font-weight: 700; font-size: 15px; word-break: break-word; }
+  .poll .opt { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 14px; }
+  .poll .opt input { width: 20px; height: 20px; min-height: 0; padding: 0; margin: 0; accent-color: var(--accent); flex: 0 0 auto; }
+  .poll .opt span { min-width: 0; word-break: break-word; }
+  .poll .bar { grid-template-columns: minmax(0,1fr) 90px 40px; margin-top: 6px; }
+  .poll .bar .lbl { word-break: break-word; }
+  .poll .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+  .poll button.ghost { background: var(--card); }
+
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 
@@ -557,6 +581,7 @@
         <div class="shrink"><button id="itSelect" class="ghost tiny" type="button" hidden>Select</button></div>
         <div class="shrink"><button id="itCal" class="ghost tiny" type="button" hidden>Add to calendar</button></div>
       </div>
+      <p class="note tiny" id="itCalHint" style="margin:-4px 0 10px" hidden>Includes the itinerary and your own reservations.</p>
       <div id="itSelBar" class="selbar" hidden>
         <span id="itSelCount" class="note">0 selected</span>
         <button id="itSelRemove" class="danger tiny" type="button" disabled>Remove selected (0)</button>
@@ -582,6 +607,11 @@
       <span id="mapCount" class="chip mute">&mdash;</span>
     </header>
     <div class="body">
+      <div id="mapPinRow" class="row" style="margin-bottom:10px" hidden>
+        <div class="shrink"><button id="mapPin" class="ghost tiny" type="button">Pin places</button></div>
+        <div><span class="note tiny">Finds the places you've typed and puts them on the map.</span></div>
+      </div>
+      <div id="mapPinOut" hidden style="margin-bottom:10px"></div>
       <details id="mapDetails">
         <summary class="note" style="cursor:pointer">Show the map</summary>
         <div style="margin-top:8px">
@@ -681,6 +711,98 @@
     </div>
   </section>
 
+  <!-- ── packing list (packing_items) ──────────────────────── -->
+  <section class="panel" id="packPanel" hidden style="margin-top:16px">
+    <header>
+      <h2>Packing</h2>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span id="packCount" class="chip mute">&mdash;</span>
+        <button id="togglePackAdd" class="tiny" type="button" hidden>Add item</button>
+      </div>
+    </header>
+    <div class="body">
+      <div id="packForm" hidden style="margin-bottom:14px">
+        <div class="grid2">
+          <div><label class="f" for="pkTitle">What to pack</label><input id="pkTitle" maxlength="200" placeholder="Rain jacket"></div>
+          <div class="row">
+            <div><label class="f" for="pkCat">Category</label><input id="pkCat" maxlength="40" list="pkCats" placeholder="Optional"></div>
+            <div class="shrink" style="width:90px"><label class="f" for="pkQty">How many</label><input id="pkQty" type="number" inputmode="numeric" min="1" max="999" placeholder="1"></div>
+          </div>
+        </div>
+        <datalist id="pkCats">
+          <option value="Documents"></option><option value="Clothes"></option><option value="Toiletries"></option>
+          <option value="Electronics"></option><option value="Health"></option><option value="Other"></option>
+        </datalist>
+        <div class="row" style="margin-top:10px">
+          <div class="shrink"><button id="savePack" type="button">Add to list</button></div>
+          <div class="shrink"><button id="cancelPack" class="ghost" type="button">Cancel</button></div>
+        </div>
+        <p class="err" id="packErr" style="margin:8px 0 0" hidden></p>
+      </div>
+      <div id="packProgress" class="bar" style="grid-template-columns:minmax(0,1fr) auto;margin-bottom:10px" hidden>
+        <div class="track"><div class="fill" id="packFill" style="width:0"></div></div>
+        <div class="num" id="packPct"></div>
+      </div>
+      <div id="packList"><p class="note" style="margin:0">Loading&hellip;</p></div>
+      <div class="row" style="margin-top:12px">
+        <div class="shrink"><button id="packStarter" class="ghost tiny" type="button" hidden>Start from a list</button></div>
+        <div class="shrink"><button id="packClear" class="danger tiny" type="button" hidden>Clear packed</button></div>
+      </div>
+      <p class="note" id="packMsg" style="margin:8px 0 0" hidden></p>
+    </div>
+  </section>
+
+  <!-- ── group chat (group-chat) ───────────────────────────── -->
+  <section class="panel" id="chatPanel" hidden style="margin-top:16px">
+    <header>
+      <h2>Trip chat</h2>
+      <span id="gcCount" class="chip mute">&mdash;</span>
+    </header>
+    <div class="body">
+      <details id="gcDetails">
+        <summary class="note" style="cursor:pointer">Show messages</summary>
+        <div style="margin-top:8px">
+          <div id="gcLog" style="margin:0 0 12px;max-height:360px;overflow:auto;display:flex;flex-direction:column;gap:8px"></div>
+          <div id="gcCompose" class="row">
+            <div><label class="f" for="gcText">Message everyone on this trip</label><textarea id="gcText" rows="2" maxlength="2000" placeholder="Write a message"></textarea></div>
+            <div class="shrink"><button id="gcSend" type="button">Send</button></div>
+          </div>
+          <p class="note tiny" style="margin:6px 0 0">New messages show up every 15 seconds while this is open.</p>
+          <p class="note" id="gcMsg" style="margin:8px 0 0" hidden></p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ── polls (voting-system) ─────────────────────────────── -->
+  <section class="panel" id="pollPanel" hidden style="margin-top:16px">
+    <header>
+      <h2>Polls</h2>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span id="pollCount" class="chip mute">&mdash;</span>
+        <button id="togglePollAdd" class="tiny" type="button" hidden>New poll</button>
+      </div>
+    </header>
+    <div class="body">
+      <div id="pollForm" hidden style="margin-bottom:14px">
+        <label class="f" for="plQ">Question</label>
+        <input id="plQ" maxlength="200" placeholder="Where should we eat on Friday?">
+        <label class="f" style="margin-top:10px">Choices</label>
+        <div id="plOpts" style="display:grid;gap:8px"></div>
+        <div class="row" style="margin-top:10px">
+          <div class="shrink"><button id="plAddOpt" class="ghost tiny" type="button">Add a choice</button></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div class="shrink"><button id="savePoll" type="button">Start poll</button></div>
+          <div class="shrink"><button id="cancelPoll" class="ghost" type="button">Cancel</button></div>
+        </div>
+        <p class="err" id="pollErr" style="margin:8px 0 0" hidden></p>
+      </div>
+      <div id="pollList"><p class="note" style="margin:0">Loading&hellip;</p></div>
+      <p class="note" id="pollMsg" style="margin:8px 0 0" hidden></p>
+    </div>
+  </section>
+
   <!-- ── documents (document-vault-api) ────────────────────── -->
   <section class="panel" id="docPanel" hidden style="margin-top:16px">
     <header>
@@ -715,7 +837,6 @@
         </div>
         <p class="note tiny" style="margin:6px 0 0">PDFs and photos (JPEG, PNG, WebP, HEIC) up to 20 MB.</p>
       </div>
-      <p class="note" id="docOwnerNote" style="margin:0" hidden>Only the person who created this trip can add documents and notes to it right now.</p>
       <p class="note" id="docMsg" style="margin:8px 0 0" hidden></p>
       <div id="docList" style="margin-top:14px"></div>
 
@@ -1446,6 +1567,10 @@
     $("peoplePanel").hidden = true;
     $("docPanel").hidden = true;
     $("alertPanel").hidden = true;
+    $("packPanel").hidden = true;
+    $("chatPanel").hidden = true;
+    $("pollPanel").hidden = true;
+    gcStop();
     hideToast();
     $("workArea").hidden = true;
     selectedTripId = null;
@@ -1490,6 +1615,9 @@
     $("peoplePanel").hidden = trips.length === 0;
     $("docPanel").hidden = trips.length === 0;
     $("alertPanel").hidden = trips.length === 0;
+    $("packPanel").hidden = trips.length === 0;
+    $("chatPanel").hidden = trips.length === 0;
+    $("pollPanel").hidden = trips.length === 0;
     fxInit();
     if (trips.length) onTripChange(); else openTripEditor(true);
   }
@@ -1532,7 +1660,10 @@
     planOnTripChange();
     // The role comes from the expense group's members; once it is known,
     // Select / Add to calendar are shown or hidden to match.
-    loadExpenses().then(function () { itToolsSync(); return loadPeople(); }, loadPeople);
+    // Packing, trip chat and polls also wait for the role / expense group.
+    wave5OnTripChange();
+    loadExpenses().then(function () { itToolsSync(); wave5AfterGroup(); return loadPeople(); },
+      function () { wave5AfterGroup(); return loadPeople(); });
     loadDocs();
     loadAlerts();
     $("tripForm").hidden = true;
@@ -2154,6 +2285,8 @@
         }
       }
       itSaved("Saved", versionId);
+      // A new or changed place gets pinned on the map in the background.
+      if (v.location && itemId && !(usedRest && !editId) && (!editId || v.location !== prev.location)) mapPinQuiet(t.id, itemId);
     } catch (err) {
       errEl.textContent = NETWORK_HINT;
       errEl.hidden = false;
@@ -2219,7 +2352,8 @@
     var canEdit = itCanEdit();
     if (itSel.on && (!canEdit || !itinerary.length)) { itSel.on = false; itSel.ids = {}; }
     $("itSelect").hidden = !(canEdit && itinerary.length && !itSel.on);
-    $("itCal").hidden = !(itIsOwner() && !itSel.on);
+    $("itCal").hidden = !(currentTrip() && !itSel.on);
+    $("itCalHint").hidden = $("itCal").hidden || itIsOwner();
     $("itTools").hidden = $("itSelect").hidden && $("itCal").hidden;
     $("itSelBar").hidden = !itSel.on;
     if (!itSel.on) setMsg("itSelMsg", "");
@@ -2331,11 +2465,12 @@
   });
 
   // ── itinerary: Add to calendar (calendar-export generate_ics) ──
-  // The calendar-export function builds the .ics server-side for the trip's
-  // OWNER only (it checks trips.user_id against the signed-in user and
-  // answers 404 otherwise), so the button is shown to the owner only. The
-  // file downloads as "<trip name>.ics". Entries with no day are left out
-  // by the backend; the toast says how many.
+  // The calendar-export function builds the .ics server-side for anyone on
+  // the trip (web wave 5; it answers 404 to people who aren't). The owner's
+  // file has every reservation on the trip; anyone else's has the itinerary
+  // plus only their own reservations, which the hint under the button says.
+  // The file downloads as "<trip name>.ics". Entries with no day are left
+  // out by the backend; the toast says how many.
   function icsFileName(t) {
     var n = String((t && (t.name || t.title)) || "Trip")
       .replace(/[\\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
@@ -2354,7 +2489,7 @@
     var d = r.data || {};
     if (!r.ok || typeof d.ics_content !== "string") {
       showToast(r.status === 401 ? VERSION_MSG.UNAUTHORIZED
-        : r.status === 404 ? "Only the trip's owner can add it to a calendar for now."
+        : r.status === 404 ? "You don't have access to this trip's calendar."
         : "The calendar file couldn't be made right now. Try again in a moment.", null);
       return;
     }
@@ -2433,6 +2568,7 @@
     var loose = itinerary.filter(function (i) { return !hasPin(i); });
     $("mapCount").textContent = itinerary.length ? pinned.length + " of " + itinerary.length + " pinned" : "nothing yet";
     $("mapCount").className = "chip " + (pinned.length ? "acc" : "mute");
+    mapPinSync();
     if (!$("mapDetails").open) return;
     var seq = ++mapState.seq;
     if (!itinerary.length) {
@@ -2480,6 +2616,691 @@
     });
   }
   $("mapDetails").addEventListener("toggle", function () { if (this.open) renderMap(); });
+
+  // ── map: Pin places (geocode-itinerary, web wave 5) ─────────
+  // POST /functions/v1/geocode-itinerary { trip_id } pins up to 50 items that
+  // have a place typed but no coordinates yet, and says how many more are
+  // waiting (`remaining`). { trip_id, item_ids: [id] } re-pins one item and
+  // runs quietly after an add or edit that sets a place. Viewers get 403
+  // FORBIDDEN, so the button is hidden for them. Pinning writes lat/lng only:
+  // no itinerary version is made.
+  var mapPinState = { busy: false, tripId: null };
+  var PIN_REASON = {
+    no_location: "no place added",
+    not_found: "couldn't find it", no_match: "couldn't find it", weak_match: "couldn't find it",
+    too_far_from_destination: "looked too far from the trip's destination"
+  };
+  function mapPinSync() {
+    var t = currentTrip();
+    if (mapPinState.tripId !== (t && t.id)) {
+      mapPinState.tripId = t && t.id;
+      $("mapPinOut").hidden = true;
+      $("mapPinOut").innerHTML = "";
+    }
+    var waiting = itinerary.some(function (i) { return !hasPin(i) && String(i.location || "").trim(); });
+    $("mapPinRow").hidden = !(t && myRole() !== "viewer" && (waiting || mapPinState.busy));
+  }
+  function mapPinOut(html) {
+    $("mapPinOut").innerHTML = html;
+    $("mapPinOut").hidden = !html;
+  }
+  function mapPinError(r) {
+    var d = (r && r.data) || {};
+    var code = typeof d.error === "string" ? d.error : "";
+    if (r.status === 401) return VERSION_MSG.UNAUTHORIZED;
+    if (code === "MFA_REQUIRED") return VERSION_MSG.MFA_REQUIRED;
+    if (code === "FORBIDDEN") return "Viewers can see the map but can't place pins.";
+    if (r.status === 404) return "We couldn't find this trip, or you're no longer on it.";
+    if (code === "GEOCODER_UNAVAILABLE" || r.status === 503) return "Place search isn't available right now. Try again later.";
+    return "Pinning didn't work this time. Try again in a moment.";
+  }
+  async function mapPinRun() {
+    var t = currentTrip(), btn = $("mapPin");
+    if (!t || mapPinState.busy) return;
+    var tripId = t.id;
+    mapPinState.busy = true;
+    btn.disabled = true;
+    btn.textContent = "Pinning…";
+    mapPinOut('<p class="note" style="margin:0">Looking up places. This can take a little while for a long itinerary.</p>');
+    var r = null;
+    try { r = await fnPost("geocode-itinerary", { trip_id: tripId }); } catch (e) { r = null; }
+    mapPinState.busy = false;
+    btn.disabled = false;
+    btn.textContent = "Pin places";
+    if ((currentTrip() || {}).id !== tripId) return;
+    if (!r) { mapPinOut('<p class="err" style="margin:0">' + esc(NETWORK_HINT) + "</p>"); mapPinSync(); return; }
+    var d = r.data || {};
+    if (!r.ok || typeof d.updated !== "number") {
+      mapPinOut('<p class="err" style="margin:0">' + esc(mapPinError(r)) + "</p>");
+      mapPinSync();
+      return;
+    }
+    var n = d.updated, skipped = Array.isArray(d.skipped) ? d.skipped : [], remaining = Number(d.remaining) || 0;
+    var head = n
+      ? "Pinned " + n + (n === 1 ? " place." : " places.")
+      : (skipped.length ? "No new places could be pinned." : "Everything with a place is already pinned.");
+    var html = '<p class="note" style="margin:0"><b>' + esc(head) + "</b></p>";
+    if (skipped.length) {
+      var shown = skipped.slice(0, 8);
+      html += '<p class="note tiny" style="margin:6px 0 2px">Not pinned:</p><ul class="note tiny" style="margin:0 0 0 18px;padding:0">'
+        + shown.map(function (s) {
+          return "<li>" + esc(s.title || "An item") + " &mdash; " + esc(PIN_REASON[s.reason] || "try again later") + "</li>";
+        }).join("")
+        + (skipped.length > shown.length ? "<li>and " + (skipped.length - shown.length) + " more</li>" : "")
+        + "</ul>";
+    }
+    if (remaining > 0) {
+      html += '<div class="row" style="margin-top:8px;align-items:center"><div class="shrink"><button id="mapPinMore" class="ghost tiny" type="button">Pin more</button></div>'
+        + '<div><span class="note tiny">' + remaining + (remaining === 1 ? " more place is" : " more places are") + " waiting.</span></div></div>";
+    }
+    mapPinOut(html);
+    loadItinerary();
+  }
+  // Fire-and-forget after an item is saved with a new place. Errors are
+  // ignored; the item simply stays unpinned and Pin places can retry it.
+  function mapPinQuiet(tripId, itemId) {
+    if (myRole() === "viewer") return;
+    fnPost("geocode-itinerary", { trip_id: tripId, item_ids: [itemId] }).then(function (r) {
+      if (r && r.ok && r.data && r.data.updated > 0 && (currentTrip() || {}).id === tripId) loadItinerary();
+    }, function () {});
+  }
+  $("mapPin").addEventListener("click", mapPinRun);
+  $("mapPinOut").addEventListener("click", function (e) { if (e.target.closest("#mapPinMore")) mapPinRun(); });
+
+  // ── shared wave 5 wiring ────────────────────────────────────
+  // Packing loads as soon as a trip is picked; trip chat and polls need the
+  // trip's expense group (the trip roster mirrored into group_members), so
+  // they start once loadExpenses has resolved it.
+  function wave5OnTripChange() {
+    loadPacking();
+    gcReset();
+    pollReset();
+  }
+  function wave5AfterGroup() {
+    packRender();
+    mapPinSync();
+    gcSync();
+    loadPolls();
+  }
+  function friendlyStatus(r, fallback) {
+    if (!r) return NETWORK_HINT;
+    if (r.status === 401) return VERSION_MSG.UNAUTHORIZED;
+    return fallback;
+  }
+
+  // ── packing list (packing_items, web wave 5) ────────────────
+  // Plain PostgREST on packing_items. Any trip member can read; people who
+  // can edit the trip can add, tick, and delete (RLS private.can_edit_trip),
+  // so viewers see the list with the controls hidden. Ticking is optimistic
+  // and reverts if the write doesn't land. Writes ask for
+  // return=representation so a write RLS quietly filtered out (0 rows) is
+  // caught as a failure instead of looking like success.
+  var pack = { tripId: null, seq: 0, items: [], loaded: false, busy: false };
+  var packDelTimer = { t: null }, packClearTimer = { t: null };
+  var PACK_STARTER = [
+    ["Passport or ID", "Documents"], ["Phone charger", "Electronics"], ["Travel adapter", "Electronics"],
+    ["Medications", "Health"], ["Toiletries", "Toiletries"], ["Clothes", "Clothes"]
+  ];
+  function packCanEdit() { return myRole() !== "viewer"; }
+  function packPath(qs) { return "/rest/v1/packing_items?" + qs; }
+  function packWriteMsg(r) {
+    if (!r) return NETWORK_HINT;
+    if (r.status === 401) return VERSION_MSG.UNAUTHORIZED;
+    if (r.status === 403 || r.status === 404 || (r.ok && Array.isArray(r.data) && !r.data.length)) {
+      return "Only people who can edit this trip can change its packing list. If you use two-step verification, sign out and back in with your code.";
+    }
+    return "That didn't save. Try again in a moment.";
+  }
+  async function loadPacking() {
+    var t = currentTrip();
+    if (!t || !session) return;
+    var tripId = t.id, seq = ++pack.seq;
+    if (pack.tripId !== tripId) {
+      pack.tripId = tripId;
+      pack.items = [];
+      pack.loaded = false;
+      $("packForm").hidden = true;
+      setMsg("packMsg", "");
+      $("packList").innerHTML = '<p class="note" style="margin:0">Loading&hellip;</p>';
+      $("packCount").textContent = "—";
+      $("packCount").className = "chip mute";
+      $("packProgress").hidden = true;
+      $("packStarter").hidden = true;
+      $("packClear").hidden = true;
+    }
+    var r = null;
+    try {
+      r = await call("GET", packPath("trip_id=eq." + encodeURIComponent(tripId)
+        + "&select=id,title,category,quantity,packed,sort_order,created_at&order=sort_order.asc,created_at.asc"));
+    } catch (e) { r = null; }
+    if (seq !== pack.seq || (currentTrip() || {}).id !== tripId) return;
+    if (!r || !r.ok || !Array.isArray(r.data)) {
+      $("packList").innerHTML = "";
+      setMsg("packMsg", friendlyStatus(r, "The packing list couldn't be loaded right now. Try again in a moment."), true);
+      return;
+    }
+    pack.items = r.data;
+    pack.loaded = true;
+    packRender();
+  }
+  function packCatName(c) { return String(c || "").trim() || "Everything else"; }
+  function packRender() {
+    if (!pack.loaded) { $("togglePackAdd").hidden = !packCanEdit() || !currentTrip(); return; }
+    var edit = packCanEdit(), items = pack.items;
+    var done = items.filter(function (i) { return i.packed; }).length;
+    $("packCount").textContent = items.length ? done + " of " + items.length + " packed" : "empty";
+    $("packCount").className = "chip " + (items.length && done === items.length ? "ok" : items.length ? "acc" : "mute");
+    $("packProgress").hidden = !items.length;
+    $("packFill").style.width = (items.length ? Math.round(done * 100 / items.length) : 0) + "%";
+    $("packPct").textContent = items.length ? Math.round(done * 100 / items.length) + "%" : "";
+    $("togglePackAdd").hidden = !edit;
+    if (!edit) $("packForm").hidden = true;
+    $("packStarter").hidden = !(edit && !items.length);
+    $("packClear").hidden = !(edit && done > 0);
+    if (!items.length) {
+      $("packList").innerHTML = '<p class="note" style="margin:0">'
+        + (edit ? "Nothing on the list yet. Add what you need to bring, or start from a basic list."
+                : "Nothing on the packing list yet.") + "</p>";
+      return;
+    }
+    var groups = {}, order = [];
+    items.forEach(function (i) {
+      var k = packCatName(i.category);
+      if (!groups[k]) { groups[k] = []; order.push(k); }
+      groups[k].push(i);
+    });
+    order.sort(function (a, b) {
+      if (a === "Everything else") return 1;
+      if (b === "Everything else") return -1;
+      return a.localeCompare(b);
+    });
+    $("packList").innerHTML = (edit ? "" : '<p class="note tiny" style="margin:0 0 6px">You can view this list but not change it.</p>')
+      + order.map(function (k) {
+        var g = groups[k], n = g.filter(function (i) { return i.packed; }).length;
+        return '<div class="daybar"><b>' + esc(k) + "</b><i>" + n + " of " + g.length + "</i></div>"
+          + g.map(function (i) {
+            var qty = Number(i.quantity) > 1 ? '<i>&times;' + esc(i.quantity) + "</i>" : "";
+            return '<div class="pk' + (i.packed ? " done" : "") + '" data-id="' + esc(i.id) + '">'
+              + '<input class="box" type="checkbox" data-pack' + (i.packed ? " checked" : "") + (edit ? "" : " disabled")
+              + ' aria-label="Packed: ' + esc(i.title) + '">'
+              + '<div class="what"><b>' + esc(i.title) + "</b>" + qty + "</div>"
+              + (edit ? '<div class="acts"><button class="danger tiny" data-del type="button">Delete</button></div>' : "<div></div>")
+              + "</div>";
+          }).join("");
+      }).join("");
+  }
+  $("togglePackAdd").addEventListener("click", function () {
+    var f = $("packForm");
+    f.hidden = !f.hidden;
+    $("packErr").hidden = true;
+    if (!f.hidden) { $("pkTitle").value = ""; $("pkQty").value = ""; $("pkTitle").focus(); }
+  });
+  $("cancelPack").addEventListener("click", function () { $("packForm").hidden = true; $("packErr").hidden = true; });
+  $("pkTitle").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); $("savePack").click(); } });
+  $("savePack").addEventListener("click", async function () {
+    var t = currentTrip(), btn = this;
+    if (!t || btn.disabled) return;
+    var title = $("pkTitle").value.trim(), cat = $("pkCat").value.trim(), qRaw = $("pkQty").value.trim();
+    var err = $("packErr");
+    err.hidden = true;
+    if (!title) { err.textContent = "Say what to pack."; err.hidden = false; return; }
+    if (title.length > 200) { err.textContent = "Keep the name under 200 characters."; err.hidden = false; return; }
+    if (cat.length > 40) { err.textContent = "Keep the category under 40 characters."; err.hidden = false; return; }
+    var qty = null;
+    if (qRaw) {
+      qty = Number(qRaw);
+      if (!(qty >= 1 && qty <= 999 && Math.floor(qty) === qty)) { err.textContent = "How many should be a whole number from 1 to 999."; err.hidden = false; return; }
+    }
+    var tripId = t.id;
+    var next = pack.items.reduce(function (m, i) { return Math.max(m, Number(i.sort_order) || 0); }, 0) + 1;
+    var body = { trip_id: tripId, title: title, sort_order: next };
+    if (cat) body.category = cat;
+    if (qty) body.quantity = qty;
+    btn.disabled = true;
+    var r = null;
+    try { r = await call("POST", "/rest/v1/packing_items", { body: body, headers: { Prefer: "return=representation" } }); } catch (e) { r = null; }
+    btn.disabled = false;
+    if ((currentTrip() || {}).id !== tripId) return;
+    if (!r || !r.ok || !Array.isArray(r.data) || !r.data.length) { err.textContent = packWriteMsg(r); err.hidden = false; return; }
+    pack.items.push(r.data[0]);
+    packRender();
+    $("pkTitle").value = "";
+    $("pkQty").value = "";
+    $("pkTitle").focus();
+  });
+  $("packList").addEventListener("change", async function (e) {
+    var box = e.target.closest("[data-pack]");
+    if (!box) return;
+    var row = box.closest(".pk"), id = row && row.getAttribute("data-id");
+    var item = pack.items.filter(function (i) { return i.id === id; })[0];
+    if (!item || !packCanEdit()) { packRender(); return; }
+    var want = box.checked, tripId = pack.tripId;
+    item.packed = want;
+    setMsg("packMsg", "");
+    packRender();
+    var r = null;
+    try {
+      r = await call("PATCH", packPath("id=eq." + encodeURIComponent(id)),
+        { body: { packed: want }, headers: { Prefer: "return=representation" } });
+    } catch (e2) { r = null; }
+    if (pack.tripId !== tripId) return;
+    if (!r || !r.ok || !Array.isArray(r.data) || !r.data.length) {
+      if (item.packed === want) item.packed = !want;
+      packRender();
+      setMsg("packMsg", packWriteMsg(r), true);
+    }
+  });
+  $("packList").addEventListener("click", async function (e) {
+    var btn = e.target.closest("[data-del]");
+    if (!btn) return;
+    var row = btn.closest(".pk"), id = row && row.getAttribute("data-id");
+    if (!id || btn.disabled) return;
+    Array.prototype.forEach.call($("packList").querySelectorAll("[data-del][data-armed]"), function (b) { if (b !== btn) disarmButton(b); });
+    if (!armButton(btn, "Tap again to delete", packDelTimer)) return;
+    clearTimeout(packDelTimer.t);
+    btn.disabled = true;
+    var tripId = pack.tripId, r = null;
+    try { r = await call("DELETE", packPath("id=eq." + encodeURIComponent(id)), { headers: { Prefer: "return=representation" } }); } catch (e2) { r = null; }
+    if (pack.tripId !== tripId) return;
+    if (!r || !r.ok || !Array.isArray(r.data) || !r.data.length) {
+      disarmButton(btn);
+      btn.disabled = false;
+      setMsg("packMsg", packWriteMsg(r), true);
+      return;
+    }
+    setMsg("packMsg", "");
+    pack.items = pack.items.filter(function (i) { return i.id !== id; });
+    packRender();
+  });
+  $("packClear").addEventListener("click", async function () {
+    var btn = this;
+    if (btn.disabled) return;
+    var ids = pack.items.filter(function (i) { return i.packed; }).map(function (i) { return i.id; });
+    if (!ids.length) return;
+    if (!armButton(btn, "Tap again to remove " + ids.length + (ids.length === 1 ? " item" : " items"), packClearTimer)) return;
+    clearTimeout(packClearTimer.t);
+    btn.disabled = true;
+    var tripId = pack.tripId, r = null;
+    try {
+      r = await call("DELETE", packPath("id=in.(" + ids.map(encodeURIComponent).join(",") + ")"), { headers: { Prefer: "return=representation" } });
+    } catch (e) { r = null; }
+    disarmButton(btn);
+    btn.disabled = false;
+    if (pack.tripId !== tripId) return;
+    if (!r || !r.ok || !Array.isArray(r.data) || !r.data.length) { setMsg("packMsg", packWriteMsg(r), true); return; }
+    var gone = {};
+    r.data.forEach(function (x) { gone[x.id] = true; });
+    pack.items = pack.items.filter(function (i) { return !gone[i.id]; });
+    setMsg("packMsg", "Removed " + r.data.length + (r.data.length === 1 ? " packed item." : " packed items."));
+    packRender();
+  });
+  $("packStarter").addEventListener("click", async function () {
+    var t = currentTrip(), btn = this;
+    if (!t || btn.disabled) return;
+    var tripId = t.id;
+    btn.disabled = true;
+    setMsg("packMsg", "");
+    var r = null;
+    try {
+      // Only when the list is still empty, in case someone else just added to it.
+      var chk = await call("GET", packPath("trip_id=eq." + encodeURIComponent(tripId) + "&select=id&limit=1"));
+      if (chk.ok && Array.isArray(chk.data) && chk.data.length) {
+        btn.disabled = false;
+        setMsg("packMsg", "Someone has already started this list, so it's been refreshed instead.");
+        loadPacking();
+        return;
+      }
+      r = await call("POST", "/rest/v1/packing_items", {
+        body: PACK_STARTER.map(function (x, i) { return { trip_id: tripId, title: x[0], category: x[1], sort_order: i + 1 }; }),
+        headers: { Prefer: "return=representation" }
+      });
+    } catch (e) { r = null; }
+    btn.disabled = false;
+    if ((currentTrip() || {}).id !== tripId) return;
+    if (!r || !r.ok || !Array.isArray(r.data) || !r.data.length) { setMsg("packMsg", packWriteMsg(r), true); return; }
+    loadPacking();
+  });
+
+  // ── trip chat (group-chat, web wave 5) ──────────────────────
+  // group-chat is keyed by the trip's expense group (group_members mirrors
+  // the trip roster), so it opens once loadExpenses has found exp.groupId.
+  // get_messages { groupId, limit } returns the newest messages oldest-first;
+  // send_message { groupId, content } posts as the signed-in user. Everyone
+  // on the trip can read and post (the backend allows viewers too). There is
+  // no realtime library here: while the section is open and the tab is
+  // visible, the list is fetched again every 15 seconds.
+  var gc = { tripId: null, groupId: null, seq: 0, timer: null, msgs: [], lastKey: "", sending: false };
+  var GC_POLL_MS = 15000;
+  function gcStop() { clearInterval(gc.timer); gc.timer = null; }
+  function gcReset() {
+    gcStop();
+    var t = currentTrip();
+    gc.tripId = t && t.id;
+    gc.groupId = null;
+    gc.msgs = [];
+    gc.lastKey = "";
+    gc.seq++;
+    $("gcLog").innerHTML = '<p class="note" style="margin:0">Loading&hellip;</p>';
+    $("gcCount").textContent = "—";
+    $("gcCount").className = "chip mute";
+    setMsg("gcMsg", "");
+    $("gcCompose").hidden = true;
+  }
+  function gcSync() {
+    var t = currentTrip();
+    if (!t || exp.tripId !== t.id) return;
+    gc.groupId = exp.groupId || null;
+    if (!gc.groupId) {
+      gcStop();
+      $("gcLog").innerHTML = '<p class="note" style="margin:0">Chat isn\'t available for this trip yet.</p>';
+      $("gcCompose").hidden = true;
+      return;
+    }
+    $("gcCompose").hidden = false;
+    if ($("gcDetails").open) { gcLoad(true); gcStart(); }
+    else gcLoad(false);
+  }
+  function gcStart() {
+    gcStop();
+    gc.timer = setInterval(function () {
+      if (document.hidden || !$("gcDetails").open || $("chatPanel").hidden) return;
+      gcLoad(false);
+    }, GC_POLL_MS);
+  }
+  function gcWhen(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return "";
+    var same = new Date().toDateString() === d.toDateString();
+    try {
+      return d.toLocaleString(undefined, same ? { hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    } catch (e) { return ""; }
+  }
+  async function gcLoad(scroll) {
+    var groupId = gc.groupId, seq = gc.seq;
+    if (!groupId) return;
+    var r = null;
+    try { r = await fnPost("group-chat", { action: "get_messages", groupId: groupId, limit: 50 }); } catch (e) { r = null; }
+    if (seq !== gc.seq || groupId !== gc.groupId) return;
+    if (!r || !r.ok || !r.data || !Array.isArray(r.data.messages)) {
+      if (!gc.msgs.length) $("gcLog").innerHTML = "";
+      setMsg("gcMsg", friendlyStatus(r, r && r.status === 404 ? "You're not on this trip's chat anymore."
+        : "Messages couldn't be loaded right now. We'll keep trying."), true);
+      return;
+    }
+    if ($("gcMsg").className === "err") setMsg("gcMsg", "");
+    gcRender(r.data.messages, scroll);
+  }
+  function gcRender(list, forceScroll) {
+    var log = $("gcLog");
+    var key = list.length ? list[list.length - 1].id + ":" + list.length : "0";
+    var nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+    var changed = key !== gc.lastKey;
+    gc.msgs = list;
+    gc.lastKey = key;
+    $("gcCount").textContent = list.length ? (list.length >= 50 ? "50+" : list.length) + (list.length === 1 ? " message" : " messages") : "quiet";
+    $("gcCount").className = "chip " + (list.length ? "acc" : "mute");
+    if (!changed && !forceScroll && log.children.length) return;
+    if (!list.length) {
+      log.innerHTML = '<p class="note" style="margin:0">No messages yet. Say hello to everyone on the trip.</p>';
+      return;
+    }
+    var me = session && session.user_id;
+    log.innerHTML = list.map(function (m) {
+      var mine = m.user_id === me;
+      var who = mine ? "You" : (m.display_name && m.display_name !== "Unknown" ? m.display_name : "Someone on the trip");
+      var tag = m.type === "announcement" ? " · announcement" : "";
+      return '<div class="gc-row"><div class="gc-who' + (mine ? " mine" : "") + '">' + esc(who + " · " + gcWhen(m.created_at) + tag)
+        + (m.edited_at ? " · edited" : "") + "</div>"
+        + '<div class="bubble ' + (mine ? "mine" : "theirs") + '">' + esc(m.content) + "</div></div>";
+    }).join("");
+    if (forceScroll || nearBottom) log.scrollTop = log.scrollHeight;
+  }
+  $("gcDetails").addEventListener("toggle", function () {
+    if (this.open && gc.groupId) { gcLoad(true); gcStart(); }
+    else gcStop();
+  });
+  $("gcSend").addEventListener("click", async function () {
+    var btn = this, text = $("gcText").value.trim(), groupId = gc.groupId, seq = gc.seq;
+    if (!groupId || gc.sending) return;
+    if (!text) { setMsg("gcMsg", "Write a message first.", true); return; }
+    gc.sending = true;
+    btn.disabled = true;
+    var r = null;
+    try { r = await fnPost("group-chat", { action: "send_message", groupId: groupId, content: text.slice(0, 2000) }); } catch (e) { r = null; }
+    gc.sending = false;
+    btn.disabled = false;
+    if (seq !== gc.seq) return;
+    if (!r || !r.ok || !r.data || !r.data.message) {
+      setMsg("gcMsg", friendlyStatus(r, r && r.status === 404 ? "You're not on this trip's chat anymore." : "Your message didn't send. Try again in a moment."), true);
+      return;
+    }
+    $("gcText").value = "";
+    setMsg("gcMsg", "");
+    gcRender(gc.msgs.concat([r.data.message]), true);
+    gcLoad(true);
+  });
+  $("gcText").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("gcSend").click(); }
+  });
+
+  // ── polls (voting-system, web wave 5) ───────────────────────
+  // voting-system is keyed by the trip's expense group too.
+  //   get_polls   { groupId, tripId, limit }       -> { polls:[{..., poll_options, userVotes}] }
+  //   cast_vote   { pollId, choices:[{optionId, rank:1}] } -> 201 { voted, autoClosedPoll }
+  //   create_poll { groupId, tripId, question, options:[text], strategy:"majority" } -> 201
+  //   close_poll  { pollId }
+  // Only organizers can start polls (the backend's rule), and the creator or
+  // an organizer can close one. Viewers see polls and results but can't
+  // vote, matching the trip's view-only role. Totals show after you vote or
+  // once a poll is closed. A poll closes itself when everyone has voted.
+  var polls = { tripId: null, groupId: null, seq: 0, list: [], busy: false };
+  var pollCloseTimer = { t: null };
+  var POLL_MSG = {
+    ALREADY_VOTED: "You've already voted in this poll.",
+    POLL_CLOSED: "This poll has closed, so it isn't taking votes anymore.",
+    POLL_NOT_FOUND: "That poll isn't there anymore. The list has been refreshed.",
+    GROUP_NOT_FOUND: "You're not on this trip's polls anymore.",
+    NOT_GROUP_MEMBER: "You're not on this trip's polls anymore.",
+    DUPLICATE_OPTION_TEXT: "Each choice needs to be different.",
+    TOO_FEW_OPTIONS: "Add at least two choices.",
+    TOO_MANY_OPTIONS: "Use six choices or fewer.",
+    QUESTION_TOO_LONG: "Shorten the question a little.",
+    OPTION_TEXT_TOO_LONG: "Shorten the longer choices a little.",
+    UNAUTHORIZED: "Only the trip's organizers can do that."
+  };
+  function pollErrMsg(r, fallback) {
+    if (!r) return NETWORK_HINT;
+    var d = r.data || {};
+    if (r.status === 401) return VERSION_MSG.UNAUTHORIZED;
+    return POLL_MSG[d.error] || fallback;
+  }
+  function pollIsOrganizer() { var r = myRole(); return r === "organizer" || r === "planner"; }
+  function pollReset() {
+    var t = currentTrip();
+    polls.tripId = t && t.id;
+    polls.groupId = null;
+    polls.list = [];
+    polls.seq++;
+    $("pollForm").hidden = true;
+    $("togglePollAdd").hidden = true;
+    $("pollList").innerHTML = '<p class="note" style="margin:0">Loading&hellip;</p>';
+    $("pollCount").textContent = "—";
+    $("pollCount").className = "chip mute";
+    setMsg("pollMsg", "");
+  }
+  async function loadPolls() {
+    var t = currentTrip();
+    if (!t || exp.tripId !== t.id) return;
+    polls.groupId = exp.groupId || null;
+    $("togglePollAdd").hidden = !(polls.groupId && pollIsOrganizer());
+    if (!polls.groupId) {
+      $("pollList").innerHTML = '<p class="note" style="margin:0">Polls aren\'t available for this trip yet.</p>';
+      return;
+    }
+    var seq = ++polls.seq, groupId = polls.groupId, tripId = t.id, r = null;
+    try { r = await fnPost("voting-system", { action: "get_polls", groupId: groupId, tripId: tripId, limit: 20 }); } catch (e) { r = null; }
+    if (seq !== polls.seq || (currentTrip() || {}).id !== tripId) return;
+    if (!r || !r.ok || !r.data || !Array.isArray(r.data.polls)) {
+      $("pollList").innerHTML = "";
+      setMsg("pollMsg", pollErrMsg(r, "Polls couldn't be loaded right now. Try again in a moment."), true);
+      return;
+    }
+    polls.list = r.data.polls;
+    pollRender();
+  }
+  function pollOpts(p) {
+    return (p.poll_options || []).slice().sort(function (a, b) { return (a.display_order || 0) - (b.display_order || 0); });
+  }
+  function pollCard(p) {
+    var opts = pollOpts(p), open = p.status === "open";
+    var mine = (p.userVotes || []).map(function (v) { return v.option_id; });
+    var voted = mine.length > 0, me = session && session.user_id;
+    var canVote = open && !voted && myRole() !== "viewer";
+    var total = opts.reduce(function (s, o) { return s + (Number(o.vote_count) || 0); }, 0);
+    var html = '<div class="poll" data-poll="' + esc(p.id) + '"><div class="q">' + esc(p.question) + "</div>";
+    if (canVote) {
+      html += opts.map(function (o) {
+        return '<label class="opt"><input type="radio" name="pv_' + esc(p.id) + '" value="' + esc(o.id) + '"><span>' + esc(o.text) + "</span></label>";
+      }).join("");
+    } else {
+      html += opts.map(function (o) {
+        var n = Number(o.vote_count) || 0, pct = total ? Math.round(n * 100 / total) : 0;
+        var win = !open && p.result_winner === o.id;
+        return '<div class="bar"><div class="lbl">' + esc(o.text) + (mine.indexOf(o.id) >= 0 ? " (your vote)" : "") + (win ? " &mdash; chosen" : "") + "</div>"
+          + '<div class="track"><div class="fill" style="width:' + pct + '%"></div></div><div class="num">' + n + "</div></div>";
+      }).join("");
+    }
+    var status = open
+      ? (voted ? "You've voted. " : "") + total + (total === 1 ? " vote so far" : " votes so far")
+      : "Closed" + (p.result_winner ? "" : total ? " with no clear winner" : " with no votes");
+    if (open && !voted && myRole() === "viewer") status = "Viewers can see polls but not vote. " + status;
+    html += '<div class="acts">'
+      + (canVote ? '<button class="tiny" type="button" data-vote>Vote</button>' : "")
+      + (open && (pollIsOrganizer() || (p.created_by && p.created_by === me)) ? '<button class="ghost tiny" type="button" data-close>Close poll</button>' : "")
+      + '<span class="note tiny">' + esc(status) + "</span></div></div>";
+    return html;
+  }
+  function pollRender() {
+    var list = polls.list;
+    var open = list.filter(function (p) { return p.status === "open"; });
+    var closed = list.filter(function (p) { return p.status !== "open"; }).slice(0, 5);
+    $("pollCount").textContent = open.length ? open.length + " open" : "none open";
+    $("pollCount").className = "chip " + (open.length ? "acc" : "mute");
+    if (!list.length) {
+      $("pollList").innerHTML = '<p class="note" style="margin:0">'
+        + (pollIsOrganizer() ? "No polls yet. Start one when the group needs to decide something." : "No polls yet. Organizers can start one when the group needs to decide something.")
+        + "</p>";
+      return;
+    }
+    $("pollList").innerHTML = (open.length ? open.map(pollCard).join("") : '<p class="note" style="margin:0">No open polls right now.</p>')
+      + (closed.length ? '<div class="subhead" style="margin-top:16px">Recently closed</div>' + closed.map(pollCard).join("") : "");
+  }
+  $("pollList").addEventListener("click", async function (e) {
+    var card = e.target.closest(".poll");
+    if (!card) return;
+    var pollId = card.getAttribute("data-poll"), btn;
+    if ((btn = e.target.closest("[data-vote]"))) {
+      var pick = card.querySelector('input[type="radio"]:checked');
+      if (!pick) { setMsg("pollMsg", "Pick a choice first, then tap Vote.", true); return; }
+      if (btn.disabled) return;
+      btn.disabled = true;
+      var r = null, seq = polls.seq;
+      try { r = await fnPost("voting-system", { action: "cast_vote", pollId: pollId, choices: [{ optionId: pick.value, rank: 1 }] }); } catch (e2) { r = null; }
+      if (seq !== polls.seq) return;
+      if (!r || !r.ok || !r.data || !r.data.voted) {
+        btn.disabled = false;
+        setMsg("pollMsg", pollErrMsg(r, "Your vote didn't go through. Try again in a moment."), true);
+        if (r && (r.status === 409 || r.status === 410 || r.status === 404)) loadPolls();
+        return;
+      }
+      setMsg("pollMsg", r.data.autoClosedPoll ? "Thanks for voting. Everyone has voted, so the poll is now closed." : "Thanks, your vote is in.");
+      loadPolls();
+      return;
+    }
+    if ((btn = e.target.closest("[data-close]"))) {
+      if (btn.disabled) return;
+      Array.prototype.forEach.call($("pollList").querySelectorAll("[data-close][data-armed]"), function (b) { if (b !== btn) disarmButton(b); });
+      if (!armButton(btn, "Tap again to close", pollCloseTimer)) return;
+      clearTimeout(pollCloseTimer.t);
+      btn.disabled = true;
+      var rc = null, seq2 = polls.seq;
+      try { rc = await fnPost("voting-system", { action: "close_poll", pollId: pollId }); } catch (e3) { rc = null; }
+      if (seq2 !== polls.seq) return;
+      if (!rc || !rc.ok) {
+        disarmButton(btn);
+        btn.disabled = false;
+        setMsg("pollMsg", pollErrMsg(rc, "The poll couldn't be closed right now. Try again in a moment."), true);
+        if (rc && (rc.status === 409 || rc.status === 404)) loadPolls();
+        return;
+      }
+      setMsg("pollMsg", "Poll closed.");
+      loadPolls();
+    }
+  });
+  function plOptRow(v) {
+    return '<div class="row" style="align-items:center"><div><input class="plOpt" maxlength="200" placeholder="A choice" value="' + esc(v || "") + '"></div>'
+      + '<div class="shrink"><button class="ghost tiny" type="button" data-rmopt aria-label="Remove this choice">Remove</button></div></div>';
+  }
+  function plOptSync() {
+    var n = $("plOpts").children.length;
+    $("plAddOpt").hidden = n >= 6;
+    Array.prototype.forEach.call($("plOpts").querySelectorAll("[data-rmopt]"), function (b) { b.hidden = n <= 2; });
+  }
+  $("togglePollAdd").addEventListener("click", function () {
+    var f = $("pollForm");
+    f.hidden = !f.hidden;
+    $("pollErr").hidden = true;
+    if (!f.hidden) {
+      $("plQ").value = "";
+      $("plOpts").innerHTML = plOptRow("") + plOptRow("");
+      plOptSync();
+      $("plQ").focus();
+    }
+  });
+  $("cancelPoll").addEventListener("click", function () { $("pollForm").hidden = true; $("pollErr").hidden = true; });
+  $("plAddOpt").addEventListener("click", function () {
+    if ($("plOpts").children.length >= 6) return;
+    $("plOpts").insertAdjacentHTML("beforeend", plOptRow(""));
+    plOptSync();
+    var all = $("plOpts").querySelectorAll(".plOpt");
+    all[all.length - 1].focus();
+  });
+  $("plOpts").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-rmopt]");
+    if (!b || $("plOpts").children.length <= 2) return;
+    b.closest(".row").remove();
+    plOptSync();
+  });
+  $("savePoll").addEventListener("click", async function () {
+    var t = currentTrip(), btn = this, err = $("pollErr");
+    if (!t || !polls.groupId || btn.disabled) return;
+    err.hidden = true;
+    var q = $("plQ").value.trim();
+    var opts = Array.prototype.map.call($("plOpts").querySelectorAll(".plOpt"), function (i) { return i.value.trim(); }).filter(Boolean);
+    if (!q) { err.textContent = "Ask a question."; err.hidden = false; return; }
+    if (opts.length < 2) { err.textContent = "Add at least two choices."; err.hidden = false; return; }
+    var seen = {};
+    for (var i = 0; i < opts.length; i++) {
+      var k = opts[i].toLowerCase();
+      if (seen[k]) { err.textContent = POLL_MSG.DUPLICATE_OPTION_TEXT; err.hidden = false; return; }
+      seen[k] = true;
+    }
+    btn.disabled = true;
+    var r = null, tripId = t.id;
+    try {
+      r = await fnPost("voting-system", { action: "create_poll", groupId: polls.groupId, tripId: tripId, question: q.slice(0, 200), options: opts.slice(0, 6), strategy: "majority" });
+    } catch (e) { r = null; }
+    btn.disabled = false;
+    if ((currentTrip() || {}).id !== tripId) return;
+    if (!r || !r.ok || !r.data || !r.data.poll) {
+      err.textContent = pollErrMsg(r, "The poll couldn't be started right now. Try again in a moment.");
+      err.hidden = false;
+      return;
+    }
+    $("pollForm").hidden = true;
+    setMsg("pollMsg", "Poll started. Everyone on the trip can vote now.");
+    loadPolls();
+  });
 
   // ── currency converter (fx-rates backend, flag fx_converter) ──
   var FX_STORE = "travelos.fx.v1";
@@ -4253,9 +5074,12 @@
   // uses GET ?action=get&document_id=, which returns a one-hour signed
   // download_url. Deleting is DELETE { document_id } or { info_id }. Notes
   // are POST { action: "create_info", trip_id, information_type, title, ... }.
-  // upload_url and create_info only accept a trip whose trips.user_id is the
-  // caller, so other trip members can read their own vault here but can't
-  // add to it; the page says so instead of letting the call fail.
+  // Since document-vault-api v23 (2026-09-25), upload_url, create_info, save
+  // and PATCH accept a trip_id for the trip's owner OR any active account
+  // member (any role, viewers included), so everyone on the trip can keep
+  // their own private documents and notes against it. What they add is still
+  // theirs alone. Someone not on the trip gets 404 "Trip not found"; a
+  // malformed trip_id gets 400 "Invalid trip_id".
   //
   // Alerts use generate-alert, the only one of the alert functions that
   // lists travel_alerts for a user and also lets that user act on them:
@@ -4297,7 +5121,8 @@
   function vaultSend(method, body) { return call(method, "/functions/v1/document-vault-api", { body: body }); }
   function vaultFail(r, what) {
     if (r && r.status === 401) return VERSION_MSG.UNAUTHORIZED;
-    if (r && r.status === 404 && /trip/i.test(r.detail || "")) return "Only the person who created this trip can add " + what + " to it right now.";
+    if (r && r.status === 404 && /trip/i.test(r.detail || "")) return "You're no longer on this trip, so you can't add " + what + " to it.";
+    if (r && r.status === 400 && /trip_id/i.test(r.detail || "")) return "This trip couldn't be found. Reload the page and try again.";
     if (r && (r.status === 403 || r.status === 404)) return "That's no longer in your documents. The list has been refreshed.";
     return "That didn't work, and nothing was changed. Try again in a moment.";
   }
@@ -4313,10 +5138,8 @@
     var t = currentTrip();
     if (!t || !session) return;
     var tripId = t.id, seq = ++docs.seq;
-    var owner = isTripOwner(t);
-    $("docAddBox").hidden = !owner;
-    $("infoAddBox").hidden = !owner;
-    $("docOwnerNote").hidden = owner;
+    $("docAddBox").hidden = false;
+    $("infoAddBox").hidden = false;
     if (docs.tripId !== tripId) {
       docs.tripId = tripId;
       setMsg("docMsg", ""); setMsg("infoMsg", "");
@@ -4365,7 +5188,7 @@
         + "<dl>" + facts.map(function (f) { return "<div><dt>" + esc(f[0]) + "</dt><dd>" + esc(f[1]) + "</dd></div>"; }).join("") + "</dl>"
         + '<div class="acts">' + (x.storage_path ? '<button class="tiny ghost" type="button" data-doc-open>Open</button>' : "")
         + '<button class="tiny danger" type="button" data-doc-del>Delete</button></div></div>';
-    }).join("") : '<p class="note" style="margin:0">No documents yet.' + (isTripOwner(currentTrip()) ? " Add a boarding pass, booking confirmation or passport scan so it's here when you need it." : "") + "</p>";
+    }).join("") : '<p class="note" style="margin:0">No documents yet. Add a boarding pass, booking confirmation or passport scan so it\'s here when you need it.</p>';
 
     var info = d.important_information || [];
     $("infoList").innerHTML = info.length ? info.map(function (n) {
