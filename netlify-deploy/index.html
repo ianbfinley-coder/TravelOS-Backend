@@ -2214,12 +2214,13 @@
   // 'HH:MM' times in the trip's time zone and work out start_time/end_time
   // themselves. They don't take country code, outdoors or fixed time, so
   // when one of those changes it's written to the item right after the
-  // versioned save. If an RPC isn't deployed yet (HTTP 404, PGRST202) the
-  // old direct itinerary_items write runs instead, unversioned.
+  // versioned save.
+  // REMOVED 2026-09-25: the unversioned fallback. All five itinerary_* RPCs
+  // are deployed and executable by `authenticated`, so the 404/PGRST202
+  // branch was unreachable. Had it ever fired it would have written straight
+  // to itinerary_items, silently bypassing the version log that History and
+  // Undo depend on -- with no error shown. A visible failure is correct here.
   var itTimer = { t: null };
-  function rpcMissing(r) {
-    return !!(r && r.status === 404 && (!r.data || !r.data.code || r.data.code === "PGRST202"));
-  }
   function hhmm(v) { return v ? String(v).slice(0, 5) : null; }
   function itemMsg(r, verb) {
     var c = versionCode(r);
@@ -2263,15 +2264,6 @@
       if (v[k] !== prev[k]) { x[k] = v[k]; any = true; }
     });
     return any ? x : null;
-  }
-  // The old direct write, kept for when the RPCs aren't deployed yet.
-  function itRestRow(t, v) {
-    return {
-      trip_id: t.id, title: v.title, type: v.type, date: v.date,
-      start_time: isoAt(v.date, v.time), end_time: isoAt(v.date, v.end_time),
-      location: v.location, country_code: v.country_code,
-      outdoor: v.outdoor, fixed: v.fixed, must_do: v.must_do
-    };
   }
   function itSaved(text, versionId) {
     $("itForm").hidden = true;
@@ -2320,10 +2312,7 @@
     var r;
     try {
       r = await rpc("itinerary_delete_items", { p_item_ids: [id], p_version_name: "Removed items" });
-      if (rpcMissing(r)) {
-        r = await call("DELETE", "/rest/v1/itinerary_items?id=eq." + encodeURIComponent(id));
-        if (r.ok) { itSaved("Removed", null); return; }
-      } else if (rpcOk(r)) {
+      if (rpcOk(r)) {
         itSaved("Removed", r.data.new_version_id);
         return;
       }
@@ -2361,7 +2350,7 @@
     var extras = itExtras(v, prev);
     $("saveIt").disabled = true;
     try {
-      var r, itemId = editId, versionId = null, usedRest = false;
+      var r, itemId = editId, versionId = null;
       if (editId) {
         var patch = {}, changed = false;
         ["title", "type", "date", "time", "end_time", "location", "must_do"].forEach(function (k) {
@@ -2373,11 +2362,7 @@
         if (!changed && !extras) { $("itForm").hidden = true; editingItem = null; return; }
         if (changed) {
           r = await rpc("itinerary_update_item", { p_item_id: editId, p_patch: patch, p_version_name: "Edited item" });
-          if (rpcMissing(r)) {
-            usedRest = true;
-            r = await call("PATCH", "/rest/v1/itinerary_items?id=eq." + encodeURIComponent(editId),
-              { body: itRestRow(t, v), headers: { Prefer: "return=minimal" } });
-          } else if (rpcOk(r)) {
+          if (rpcOk(r)) {
             versionId = r.data.new_version_id || null;
           }
         }
@@ -2387,23 +2372,18 @@
         if (v.time && v.end_time) add.end_time = v.end_time;
         if (v.location) add.location = v.location;
         r = await rpc("itinerary_add_items", { p_trip_id: t.id, p_items: [add], p_version_name: "Added item" });
-        if (rpcMissing(r)) {
-          usedRest = true;
-          extras = null;
-          r = await call("POST", "/rest/v1/itinerary_items",
-            { body: itRestRow(t, v), headers: { Prefer: "return=minimal" } });
-        } else if (rpcOk(r)) {
+        if (rpcOk(r)) {
           versionId = r.data.new_version_id || null;
           itemId = Array.isArray(r.data.item_ids) ? r.data.item_ids[0] : null;
         }
       }
-      if (r && !(usedRest ? r.ok : rpcOk(r))) {
+      if (r && !rpcOk(r)) {
         errEl.textContent = itemMsg(r, "saved");
         errEl.hidden = false;
         if (versionCode(r) === "NOT_FOUND") loadItinerary();
         return;
       }
-      if (extras && itemId && !(usedRest && editId)) {
+      if (extras && itemId) {
         var x = await call("PATCH", "/rest/v1/itinerary_items?id=eq." + encodeURIComponent(itemId),
           { body: extras, headers: { Prefer: "return=minimal" } });
         if (!x.ok) {
@@ -2417,7 +2397,7 @@
       }
       itSaved("Saved", versionId);
       // A new or changed place gets pinned on the map in the background.
-      if (v.location && itemId && !(usedRest && !editId) && (!editId || v.location !== prev.location)) mapPinQuiet(t.id, itemId);
+      if (v.location && itemId && (!editId || v.location !== prev.location)) mapPinQuiet(t.id, itemId);
     } catch (err) {
       errEl.textContent = NETWORK_HINT;
       errEl.hidden = false;
