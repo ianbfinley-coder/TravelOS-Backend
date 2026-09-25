@@ -336,6 +336,11 @@
   .prep .what b { font-weight: 600; }
   .prep.done .what b, .prep.na .what b { color: var(--ink-3); text-decoration: line-through; font-weight: 500; }
   .prep .what p { margin: 4px 0 0; font-size: 13.5px; color: var(--ink-2); }
+  .prep.late { background: var(--warn-soft); border-radius: 12px; padding: 10px; margin: 2px 0; border-top-color: transparent; }
+  .prep.late + .prep { border-top-color: transparent; }
+  .prep .late-when { color: var(--warn); font-weight: 600; }
+  .dim.na b { color: var(--ink-3); }
+  .dim.na p { color: var(--ink-3); }
   .prep .meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; font-size: 12.5px; color: var(--ink-3); }
   .aq { padding: 10px 0; border-top: 1px solid var(--line-2); }
   .aq:first-child { border-top: 0; }
@@ -704,6 +709,24 @@
       </div>
       <p class="note" id="sosMsg" style="margin:8px 0 0" hidden></p>
       <div id="sosOut"></div>
+
+      <div class="subhead">Emergency medical info</div>
+      <p class="note" style="margin:0 0 10px">Your blood type, allergies, conditions and medications, ready for a doctor or first responder. This is private to you: it isn't shared with anyone on your trips, and it's stored encrypted.</p>
+      <button id="medShow" class="ghost tiny" type="button">Show my medical info</button>
+      <p class="note" id="medMsg" style="margin:8px 0 0" hidden></p>
+      <div id="medForm" hidden style="margin-top:8px">
+        <div class="grid2">
+          <div><label class="f" for="medName">Name</label><input id="medName" type="text" maxlength="200" autocomplete="off" placeholder="Your full name"></div>
+          <div><label class="f" for="medBlood">Blood type</label><select id="medBlood"></select></div>
+          <div style="grid-column:1/-1"><label class="f" for="medAllergies">Allergies</label><textarea id="medAllergies" rows="2" maxlength="1000" placeholder="For example: penicillin, peanuts"></textarea></div>
+          <div style="grid-column:1/-1"><label class="f" for="medConditions">Medical conditions</label><textarea id="medConditions" rows="2" maxlength="1000" placeholder="For example: asthma, type 1 diabetes"></textarea></div>
+          <div style="grid-column:1/-1"><label class="f" for="medMeds">Medications</label><textarea id="medMeds" rows="2" maxlength="1000" placeholder="Name and dose, for example: insulin, 10 units"></textarea></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div class="shrink"><button id="medSave" type="button">Save</button></div>
+          <div class="shrink"><button id="medHide" class="ghost" type="button">Hide</button></div>
+        </div>
+      </div>
 
       <div class="subhead">Entry &amp; health checklist</div>
       <p class="note" style="margin:0 0 10px">Your to-do list for this trip's countries: passport, visas, health, insurance and more. It's built from the countries on your itinerary and doesn't use AI credit.</p>
@@ -1670,6 +1693,7 @@
     $("agreePanel").hidden = true;
     $("prefDetails").open = false;
     pref.loaded = false;
+    medReset();
     gcStop();
     hideToast();
     $("workArea").hidden = true;
@@ -1685,6 +1709,8 @@
     chip.textContent = on ? "signed in" : "signed out";
     if (on) {
       $("whoami").textContent = session.email || session.user_id;
+    } else if (typeof medReset === "function") {
+      medReset();
     }
   }
 
@@ -4565,6 +4591,7 @@
     safe.picked = false;
     safe.itinReady = false;
     safe.prep = [];
+    safe.prepDomestic = 0;
     safe.prepBusy = {};
     ["sosOut", "prepOut", "advOut"].forEach(function (id) { $(id).innerHTML = ""; });
     ["sosMsg", "prepMsg", "advMsg"].forEach(function (id) { setMsg(id, ""); });
@@ -4630,6 +4657,90 @@
     $("sosOut").innerHTML = html;
   }
 
+  // Emergency medical info (emergency-mode GET/PUT /me/emergency-info).
+  // It belongs to the signed-in person, not the trip, and is only loaded
+  // when they ask. Values are never logged.
+  var MED_BLOOD = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+  var med = { seq: 0, busy: false };
+  function medText(v) {
+    if (Array.isArray(v)) return v.filter(function (x) { return x != null && x !== ""; }).map(String).join(", ");
+    return v == null ? "" : String(v);
+  }
+  function medBloodOptions(cur) {
+    var opts = MED_BLOOD.slice();
+    if (cur && opts.indexOf(cur) < 0) opts.push(cur);
+    $("medBlood").innerHTML = '<option value="">Not set</option>' + opts.map(function (b) {
+      return '<option value="' + esc(b) + '">' + esc(b.replace(/-$/, "−")) + "</option>";
+    }).join("");
+    $("medBlood").value = cur || "";
+  }
+  function medFill(d) {
+    d = d && typeof d === "object" && !Array.isArray(d) ? d : {};
+    $("medName").value = medText(d.name);
+    medBloodOptions(medText(d.bloodType).trim());
+    $("medAllergies").value = medText(d.allergies);
+    $("medConditions").value = medText(d.conditions);
+    $("medMeds").value = medText(d.medications);
+  }
+  function medReset() {
+    if (!med) return; // renderAuth can run before this section has set up
+    med.seq++;
+    med.busy = false;
+    medFill(null);
+    $("medForm").hidden = true;
+    $("medShow").hidden = false;
+    $("medShow").disabled = false;
+    $("medSave").disabled = false;
+    setMsg("medMsg", "");
+  }
+  function medErr(r, fallback) {
+    if (!r) return NETWORK_HINT;
+    if (r.status === 401) return VERSION_MSG.UNAUTHORIZED;
+    if (r.status === 503) return "Medical info storage isn't switched on yet.";
+    return fallback;
+  }
+  $("medShow").addEventListener("click", async function () {
+    if (!session) return;
+    var seq = ++med.seq, btn = this;
+    btn.disabled = true;
+    setMsg("medMsg", "Loading…");
+    var r;
+    try { r = await fnGet("emergency-mode", "/me/emergency-info"); }
+    catch (e) { r = null; }
+    if (seq !== med.seq) return;
+    btn.disabled = false;
+    if (r && (r.ok || r.status === 404)) {
+      var d = r.ok ? r.data : null;
+      medFill(d);
+      btn.hidden = true;
+      $("medForm").hidden = false;
+      var empty = !["name", "bloodType", "allergies", "conditions", "medications"].some(function (k) { return d && medText(d[k]).trim(); });
+      setMsg("medMsg", empty ? "Nothing saved yet. Fill in what a doctor should know, then tap Save." : "");
+      return;
+    }
+    setMsg("medMsg", medErr(r, "Your medical info couldn't be loaded right now. Try again in a moment."), true);
+  });
+  $("medHide").addEventListener("click", function () { medReset(); });
+  $("medSave").addEventListener("click", async function () {
+    if (!session || med.busy) return;
+    var val = function (id) { var v = $(id).value.trim(); return v ? v : null; };
+    var body = { name: val("medName"), bloodType: val("medBlood"), allergies: val("medAllergies"),
+      conditions: val("medConditions"), medications: val("medMeds") };
+    var seq = med.seq, btn = this;
+    med.busy = true;
+    btn.disabled = true;
+    setMsg("medMsg", "Saving…");
+    var r;
+    try { r = await call("PUT", "/functions/v1/emergency-mode/me/emergency-info", { body: body }); }
+    catch (e) { r = null; }
+    if (seq !== med.seq) return;
+    med.busy = false;
+    btn.disabled = false;
+    if (r && r.ok) { setMsg("medMsg", "Saved. Only you can see this."); return; }
+    setMsg("medMsg", medErr(r, "That didn't save. Try again in a moment."), true);
+  });
+  medBloodOptions("");
+
   // Entry & health checklist. GET /prep/me builds the list the first time and
   // returns the saved one after that; the home time zone lets it add a
   // jet-lag plan when it's built.
@@ -4651,6 +4762,7 @@
     }
     setMsg("prepMsg", "");
     safe.prep = Array.isArray(r.data.items) ? r.data.items : [];
+    safe.prepDomestic = Number(r.data.omittedAsDomestic) || 0;
     btn.hidden = true;
     if (!safe.prep.length) {
       btn.hidden = false;
@@ -4664,18 +4776,22 @@
     var t = currentTrip();
     $("prepOut").innerHTML = '<div style="margin-top:8px">' + safe.prep.map(function (it) {
       var sev = PREP_SEV[it.severity] || PREP_SEV.info, st = it.status || "todo", src = safeUrl(it.source_url);
-      return '<div class="prep' + (st === "done" ? " done" : st === "not_applicable" ? " na" : "") + '" data-id="' + esc(it.id) + '">'
+      var late = st === "todo" && it.overdue === true;
+      return '<div class="prep' + (st === "done" ? " done" : st === "not_applicable" ? " na" : late ? " late" : "") + '" data-id="' + esc(it.id) + '">'
         + '<input type="checkbox" class="box" data-prep aria-label="Done: ' + esc(it.title || "") + '"' + (st === "done" ? " checked" : "") + ">"
         + '<div class="what"><b>' + esc(it.title || "") + "</b>"
         + (it.detail ? "<p>" + esc(it.detail) + "</p>" : "")
-        + '<div class="meta"><span class="chip ' + sev[0] + '">' + esc(sev[1]) + "</span>"
-        + (it.due_date && st === "todo" ? "<span>By " + esc(fmtDay(it.due_date)) + "</span>" : "")
+        + '<div class="meta">' + (late ? '<span class="chip warn">Overdue</span>' : "") + '<span class="chip ' + sev[0] + '">' + esc(sev[1]) + "</span>"
+        + (it.due_date && st === "todo" ? (late ? '<span class="late-when">Was due ' + esc(fmtDay(it.due_date)) + "</span>" : "<span>By " + esc(fmtDay(it.due_date)) + "</span>") : "")
         + (src ? '<a href="' + esc(src) + '" target="_blank" rel="noopener">Official info</a>' : "")
         + '<button type="button" class="ghost tiny" data-na>' + (st === "not_applicable" ? "Needed after all" : "Not needed") + "</button>"
         + "</div></div></div>";
-    }).join("") + "</div>";
+    }).join("") + "</div>"
+      + (safe.prepDomestic > 0 ? '<p class="note tiny" style="margin:8px 0 0">Passport and visa items are hidden because this trip is in your home country.</p>' : "");
     var done = safe.prep.filter(function (i) { return i.status !== "todo"; }).length;
-    setMsg("prepMsg", done + " of " + safe.prep.length + " done" + (t && t.start_date ? " · trip starts " + fmtDay(t.start_date) : ""));
+    var late = safe.prep.filter(function (i) { return (i.status || "todo") === "todo" && i.overdue === true; }).length;
+    setMsg("prepMsg", done + " of " + safe.prep.length + " done" + (late ? " · " + late + " overdue" : "")
+      + (t && t.start_date ? " · trip starts " + fmtDay(t.start_date) : ""));
   }
   async function prepSet(id, status) {
     var t = currentTrip(), it = safe.prep.filter(function (x) { return x.id === id; })[0];
@@ -4731,9 +4847,17 @@
     }
     setMsg("advMsg", "");
     btn.textContent = "Check again";
+    var anyReal = false;
     $("advOut").innerHTML = '<div style="margin-top:8px">' + list.map(function (b) {
       var srcs = Array.isArray(b.sources) ? b.sources : [];
+      var allNa = srcs.length > 0 && srcs.every(function (s) { return s && s.status === "not_applicable"; });
+      if (!allNa || b.status === "unavailable") anyReal = true;
       var body = srcs.length ? srcs.map(function (s) {
+        var who0 = s.source === "UK" ? "UK government" : "US State Department";
+        if (s.status === "not_applicable") {
+          return '<div class="dim na"><div class="top"><b>' + esc(who0) + "</b></div>"
+            + "<p>" + esc(String(s.note || s.headline || "This source doesn't give travel advice for this country.")) + "</p></div>";
+        }
         var lvl = Number(s.level), url = safeUrl(s.advisoryUrl);
         var head = String(s.headline || "");
         if (head.length > 320) head = head.slice(0, 317).replace(/\s+\S*$/, "") + "…";
@@ -4744,9 +4868,13 @@
           + (head && !/^no advisory found/i.test(head) ? "<p>" + esc(head) + "</p>" : "<p>No advisory text was available.</p>")
           + '<p class="tiny">' + (s.fetchedAt ? "Checked " + esc(when(s.fetchedAt)) + (s.stale ? " (couldn't refresh, so this may be out of date)" : "") + ". " : "")
           + (url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">Read the official advice</a>' : "") + "</p></div>";
-      }).join("") : '<p class="note" style="margin:4px 0 0">No official advice could be fetched for this country right now. Check your government\'s travel advice site directly.</p>';
+      }).join("") : "";
+      if (!srcs.length || (b.status === "unavailable" && allNa)) {
+        body += '<p class="note" style="margin:4px 0 0">' + (srcs.length ? "Other official advice couldn't" : "No official advice could")
+          + " be fetched for this country right now. Check your government\'s travel advice site directly.</p>";
+      }
       return '<div class="res" style="margin-top:10px"><div class="top"><span class="name">' + esc(countryName(b.countryCode || "")) + "</span></div>" + body + "</div>";
-    }).join("") + '<p class="note tiny" style="margin:10px 0 0">Always check the latest official advice before you travel.</p></div>';
+    }).join("") + (anyReal ? '<p class="note tiny" style="margin:10px 0 0">Always check the latest official advice before you travel.</p>' : "") + "</div>";
   });
 
   // ── group agreements (agreement-engine) ─────────────────────
