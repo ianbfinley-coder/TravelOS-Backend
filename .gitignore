@@ -16,3 +16,9 @@ build
 
 # Supabase CLI local cache
 supabase/.temp/
+
+# Full data dump: contains personal data (auth_identities, platform_users,
+# profiles, trips, reservations, budget_preferences, audit_log, the owner's
+# email). Useful as a LOCAL backup; must not be committed.
+# For reference data in the repo, use supabase/reference-data.sql instead.
+supabase/seed.sql
