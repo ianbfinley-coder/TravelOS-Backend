@@ -242,6 +242,24 @@
   .hazard { border-left: 3px solid var(--warn); background: var(--warn-soft); color: var(--warn);
             padding: 10px 12px; border-radius: 0 10px 10px 0; font-size: 13.5px; margin-top: 12px; }
 
+  .hazard.good { border-left-color: var(--ok); background: var(--ok-soft); color: var(--ok); }
+  .hazard.good button { margin-left: 8px; }
+
+  /* ── trip health ──────────────────────────────────────────── */
+  .subhead { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; margin: 20px 0 8px; }
+  .subhead:first-child { margin-top: 0; }
+  .score { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 10px; }
+  .score b { font-size: 40px; font-weight: 800; letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .score i { font-style: normal; font-size: 14px; color: var(--ink-3); }
+  .bars { display: grid; gap: 8px; margin-top: 14px; }
+  .bar { display: grid; grid-template-columns: 112px minmax(0,1fr) 44px; gap: 10px; align-items: center; font-size: 13px; }
+  .bar .lbl { color: var(--ink-2); font-weight: 600; }
+  .bar .track { height: 8px; border-radius: 999px; background: var(--card-2); overflow: hidden; }
+  .bar .fill { height: 100%; border-radius: 999px; background: var(--accent); }
+  .bar .fill.warn { background: var(--warn); }
+  .bar .fill.bad { background: var(--bad); }
+  .bar .num { text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 
@@ -502,6 +520,27 @@
         <p class="err" id="itErr" style="margin:10px 0 0" hidden></p>
       </form>
       <div id="itList"></div>
+      <details id="histDetails" style="margin-top:16px">
+        <summary class="note" style="cursor:pointer">History</summary>
+        <div style="margin-top:8px">
+          <div id="histList"></div>
+          <p class="note tiny" style="margin:10px 0 0">Restoring puts the itinerary back the way it was in that version. Anything added or changed since then, including edits made here with Add item, Edit or Remove, is replaced.</p>
+          <p class="note" id="histMsg" style="margin:8px 0 0" hidden></p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ── trip health ───────────────────────────────────────── -->
+  <section class="panel" id="healthPanel" hidden style="margin-top:16px">
+    <header>
+      <h2>Trip health</h2>
+      <button id="runHealth" class="tiny" type="button">Run check</button>
+    </header>
+    <div class="body">
+      <p class="note" id="healthProgress" style="margin:0 0 12px" hidden></p>
+      <p class="note" id="healthMsg" style="margin:0 0 12px" hidden></p>
+      <div id="healthBody"><p class="note" style="margin:0">Loading&hellip;</p></div>
     </div>
   </section>
 
@@ -635,6 +674,7 @@
         <button type="button" class="tab on" id="aiTabChat" role="tab" aria-selected="true">Ask copilot</button>
         <button type="button" class="tab" id="aiTabSolve" role="tab" aria-selected="false">Suggest changes</button>
         <button type="button" class="tab" id="aiTabExtract" role="tab" aria-selected="false">Extract reservation</button>
+        <button type="button" class="tab" id="aiTabPlan" role="tab" aria-selected="false">Plan my trip</button>
       </div>
 
       <div id="aiPaneChat">
@@ -669,6 +709,53 @@
         </div>
         <div id="extractResult" style="margin-top:12px"></div>
         <p class="err" id="extractErr" style="margin:10px 0 0" hidden></p>
+      </div>
+
+      <div id="aiPanePlan" hidden>
+        <div class="hazard">Builds a draft day-by-day plan for this trip with AI, which uses AI credit. Nothing is added to your itinerary until you choose Add to my trip.</div>
+        <p class="note" id="planDatesNote" style="margin:12px 0 0" hidden>This trip doesn't have start and end dates yet, so the plan won't have dates and can't be added to your itinerary. Set them with Edit on the Trip card first.</p>
+        <div class="grid2" style="margin-top:12px">
+          <div>
+            <label class="f" for="planPace">Pace</label>
+            <select id="planPace">
+              <option value="">No preference</option>
+              <option value="relaxed">Relaxed</option>
+              <option value="balanced">Balanced</option>
+              <option value="busy">Packed</option>
+            </select>
+          </div>
+          <div>
+            <label class="f" for="planWalk">Longest walk you're comfortable with (minutes)</label>
+            <input id="planWalk" type="text" inputmode="numeric" maxlength="3" placeholder="Optional, e.g. 20">
+          </div>
+          <div style="grid-column:1/-1">
+            <label class="f" for="planInterests">Interests</label>
+            <input id="planInterests" maxlength="500" placeholder="Food, museums, architecture">
+          </div>
+          <div>
+            <label class="f" for="planMust">Must do</label>
+            <input id="planMust" maxlength="500" placeholder="Belém Tower, a fado show">
+          </div>
+          <div>
+            <label class="f" for="planAvoid">Avoid</label>
+            <input id="planAvoid" maxlength="500" placeholder="Long bus rides, nightclubs">
+          </div>
+          <div style="grid-column:1/-1">
+            <label class="f" for="planBudget">Budget</label>
+            <input id="planBudget" maxlength="300" placeholder="Optional, e.g. mid-range, about $150 a day">
+          </div>
+        </div>
+        <p class="note tiny" style="margin:6px 0 0">Separate several things with commas.</p>
+        <div class="row" style="margin-top:12px">
+          <div class="shrink"><button id="planBtn" type="button">Plan my trip</button></div>
+        </div>
+        <p class="note" id="planProgress" style="margin:10px 0 0" hidden></p>
+        <p class="err" id="planErr" style="margin:10px 0 0" hidden></p>
+        <div id="planResult" style="margin-top:12px"></div>
+        <div class="row" id="planAddRow" style="margin-top:12px" hidden>
+          <div class="shrink"><button id="planAdd" type="button">Add to my trip</button></div>
+        </div>
+        <div class="hazard good" id="planDone" hidden><span id="planDoneText"></span><button id="planUndo" class="ghost tiny" type="button" hidden>Undo</button></div>
       </div>
     </div>
   </section>
@@ -1201,6 +1288,7 @@
     renderAuth();
     $("tripPanel").hidden = true;
     $("itinPanel").hidden = true;
+    $("healthPanel").hidden = true;
     $("aiPanel").hidden = true;
     $("fxPanel").hidden = true;
     $("expPanel").hidden = true;
@@ -1241,6 +1329,7 @@
     $("tripPanel").hidden = false;
     $("workArea").hidden = trips.length === 0;
     $("itinPanel").hidden = trips.length === 0;
+    $("healthPanel").hidden = trips.length === 0;
     $("aiPanel").hidden = trips.length === 0;
     $("expPanel").hidden = trips.length === 0;
     $("peoplePanel").hidden = trips.length === 0;
@@ -1283,6 +1372,7 @@
     loadDerived();
     loadItinerary();
     fxOnTripChange();
+    planOnTripChange();
     loadExpenses().then(loadPeople, loadPeople);
     $("tripForm").hidden = true;
   }
@@ -1559,6 +1649,10 @@
     var r = await call("GET", "/rest/v1/itinerary_items?trip_id=eq." + encodeURIComponent(t.id)
       + "&select=id,title,type,date,start_time,end_time,location,country_code,outdoor,fixed,must_do"
       + "&order=date.asc,start_time.asc");
+    // Health readers and history follow every itinerary (re)load: trip
+    // selected, web edits, copilot changes, restores and AI plans.
+    loadHistory();
+    loadHealth();
     if (!r.ok) {
       $("itList").innerHTML = '<p class="err">Could not load the itinerary. ' + esc(r.detail || ("HTTP " + r.status)) + "</p>";
       $("itCount").textContent = "error";
@@ -1837,8 +1931,8 @@
 
   // ── AI tools ───────────────────────────────────────────────
   function showAiTab(which) {
-    var tabs = { chat: $("aiTabChat"), solve: $("aiTabSolve"), extract: $("aiTabExtract") };
-    var panes = { chat: $("aiPaneChat"), solve: $("aiPaneSolve"), extract: $("aiPaneExtract") };
+    var tabs = { chat: $("aiTabChat"), solve: $("aiTabSolve"), extract: $("aiTabExtract"), plan: $("aiTabPlan") };
+    var panes = { chat: $("aiPaneChat"), solve: $("aiPaneSolve"), extract: $("aiPaneExtract"), plan: $("aiPanePlan") };
     Object.keys(tabs).forEach(function (k) {
       var on = k === which;
       tabs[k].classList.toggle("on", on);
@@ -1849,6 +1943,7 @@
   $("aiTabChat").addEventListener("click", function () { showAiTab("chat"); });
   $("aiTabSolve").addEventListener("click", function () { showAiTab("solve"); });
   $("aiTabExtract").addEventListener("click", function () { showAiTab("extract"); });
+  $("aiTabPlan").addEventListener("click", function () { showAiTab("plan"); });
 
   // ── ask copilot ────────────────────────────────────────────
   var chatMessages = [];
@@ -2854,6 +2949,642 @@
       : "We couldn't add you to the trip" + (r.detail ? ": " + r.detail : ".") + " If you're already on this trip, you don't need the link.";
     showBanner(msg);
   }
+
+  // ADDED 2026-09-25 (web wave 2): Trip health, itinerary history and the AI
+  // trip planner.
+  //
+  // Trip health reads four trip-level readers (get-trip-readiness,
+  // get-trip-health, get-daily-friction, get-trip-issues). The analyze-* and
+  // detect-* functions are billed AI calls, so they run only from the Run
+  // check button, never on load. Viewers can read results; the server answers
+  // their Run check with 403 FORBIDDEN and a message we show as is.
+  //
+  // History lists itinerary_versions (RLS: any trip member can read). Restore
+  // and Undo go through the itinerary_restore_version / itinerary_undo_change
+  // RPCs, which check the caller's editing role and two-step rule themselves
+  // and answer { ok:false, code } instead of an HTTP error. Web edits made
+  // with Add item / Edit / Remove write itinerary_items directly and do NOT
+  // create a version, so a restore replaces them too (the History note says
+  // so).
+  //
+  // The planner calls generate-itinerary, which stores nothing and returns a
+  // draft plan. Add to my trip sends the dated activities to
+  // itinerary_add_items, which writes the items plus a new active version in
+  // one transaction; its new_version_id is what Undo rolls back.
+  function fnPost(name, body) { return call("POST", "/functions/v1/" + name, { body: body }); }
+  function rpc(name, args) { return call("POST", "/rest/v1/rpc/" + name, { body: args }); }
+
+  var VERSION_MSG = {
+    UNAUTHORIZED: "Your sign-in has expired. Sign out, sign back in, and try again.",
+    MFA_REQUIRED: "This account uses two-step verification. Sign out and sign back in with your authenticator code, then try again.",
+    FORBIDDEN: "Only people who can edit this trip can change its itinerary.",
+    NOT_FOUND: "We couldn't find that version, or you can't make changes to this trip's itinerary.",
+    STALE: "The itinerary has changed since then, so this can't be done automatically. The list has been refreshed; take a look and try again.",
+    LEGACY_SNAPSHOT: "This older version was saved in a format that can't be restored.",
+    NO_PREVIOUS_VERSION: "There's no earlier version to go back to.",
+    BAD_ITEMS: "The plan didn't have anything that could be added.",
+    BAD_ITEM: "One of the plan's activities couldn't be added, so nothing was changed. Try planning again.",
+    _default: "That didn't work, and nothing was changed. Try again in a moment."
+  };
+  function versionCode(r) {
+    var d = r && r.data;
+    if (d && typeof d === "object" && d.code && d.ok === false) return String(d.code);
+    if (r && !r.ok && /BAD_ITEM/.test(r.detail || "")) return "BAD_ITEM";
+    if (r && r.status === 401) return "UNAUTHORIZED";
+    return "";
+  }
+  function versionMsg(r) { return VERSION_MSG[versionCode(r)] || VERSION_MSG._default; }
+  function rpcOk(r) { return !!(r && r.ok && r.data && r.data.ok === true); }
+  function setMsg(id, t, isErr) {
+    var el = $(id);
+    el.textContent = t || "";
+    el.hidden = !t;
+    el.className = isErr ? "err" : "note";
+  }
+  function armButton(btn, armedText, timerHolder) {
+    if (btn.dataset.armed) return true;
+    var orig = btn.textContent;
+    btn.dataset.armed = "1";
+    btn.dataset.orig = orig;
+    btn.textContent = armedText;
+    clearTimeout(timerHolder.t);
+    timerHolder.t = setTimeout(function () { disarmButton(btn); }, 5000);
+    return false;
+  }
+  function disarmButton(btn) {
+    if (btn.dataset.orig) btn.textContent = btn.dataset.orig;
+    delete btn.dataset.armed;
+    delete btn.dataset.orig;
+  }
+
+  // ── trip health ─────────────────────────────────────────────
+  var health = { seq: 0, tripId: null, running: false };
+  var SEV_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"];
+  var SEV_LABEL = { CRITICAL: "Urgent", HIGH: "Important", MEDIUM: "Worth fixing", LOW: "Minor", INFO: "Good to know" };
+  var SEV_CHIP = { CRITICAL: "bad", HIGH: "bad", MEDIUM: "warn", LOW: "acc", INFO: "acc" };
+  var READY_LABEL = { READY: "Ready", MOSTLY_READY: "Mostly ready", NEEDS_ATTENTION: "Needs attention", UNKNOWN: "Not enough to tell yet" };
+  var READY_CHIP = { READY: "ok", MOSTLY_READY: "acc", NEEDS_ATTENTION: "warn", UNKNOWN: "mute" };
+  var HEALTH_LABEL = { excellent: "Excellent", good: "Good", watch: "Worth a look", needs_attention: "Needs attention" };
+  var HEALTH_CHIP = { excellent: "ok", good: "ok", watch: "warn", needs_attention: "bad" };
+  var FRICTION_LABEL = { LOW: "Easy", MODERATE: "Moderate", ELEVATED: "Busy", HIGH: "Demanding", VERY_HIGH: "Very demanding", UNKNOWN: "Not scored" };
+  var FRICTION_CHIP = { LOW: "ok", MODERATE: "acc", ELEVATED: "warn", HIGH: "bad", VERY_HIGH: "bad", UNKNOWN: "mute" };
+  var HEALTH_PARTS = [
+    ["Schedule", "schedule_score"], ["Getting around", "geography_score"], ["Pace", "pace_score"],
+    ["Budget", "budget_score"], ["Details", "completeness_score"]
+  ];
+
+  async function loadHealth() {
+    var t = currentTrip();
+    if (!t || !session) return;
+    var tripId = t.id;
+    var seq = ++health.seq;
+    if (health.tripId !== tripId) {
+      health.tripId = tripId;
+      $("healthBody").innerHTML = '<p class="note" style="margin:0">Loading&hellip;</p>';
+    }
+    if (!health.running) setMsg("healthMsg", "");
+    var body = { trip_id: tripId };
+    var r;
+    try {
+      r = await Promise.all([
+        call("GET", "/functions/v1/get-trip-readiness?trip_id=" + encodeURIComponent(tripId)),
+        fnPost("get-trip-health", body),
+        fnPost("get-daily-friction", body),
+        fnPost("get-trip-issues", body)
+      ]);
+    } catch (e) {
+      if (seq === health.seq) { $("healthBody").innerHTML = ""; setMsg("healthMsg", NETWORK_HINT, true); }
+      return;
+    }
+    if (seq !== health.seq || (currentTrip() || {}).id !== tripId) return;
+    renderHealth(r[0], r[1], r[2], r[3]);
+  }
+
+  function renderHealth(rReady, rHealth, rFriction, rIssues) {
+    var ready = rReady.ok && rReady.data && typeof rReady.data === "object" ? rReady.data : null;
+    var noItems = ready ? ready.itinerary_item_count === 0 : itinerary.length === 0;
+    $("runHealth").hidden = noItems;
+    if (noItems) {
+      $("healthBody").innerHTML = '<p class="note" style="margin:0">Add something to your itinerary to see this.</p>';
+      return;
+    }
+    var viewer = myRole() === "viewer";
+    var a = rHealth.ok && rHealth.data ? rHealth.data.analysis : null;
+    var html = "";
+
+    // Overall score
+    html += '<div class="subhead">Overall</div>';
+    if (a) {
+      var score = Math.round(Number(a.health_score) || 0);
+      html += '<div class="score"><b>' + esc(String(score)) + "</b><i>out of 100</i>"
+        + '<span class="chip ' + (HEALTH_CHIP[a.health_status] || "mute") + '">' + esc(HEALTH_LABEL[a.health_status] || "Checked") + "</span></div>";
+      if (a.overall_assessment) html += '<p style="margin:10px 0 0">' + esc(a.overall_assessment) + "</p>";
+      if (a.health_trend_message) html += '<p class="note" style="margin:6px 0 0">' + esc(a.health_trend_message) + "</p>";
+      html += '<div class="bars">' + HEALTH_PARTS.map(function (p) {
+        var v = Number(a[p[1]]);
+        if (!isFinite(v)) return "";
+        v = Math.max(0, Math.min(20, v));
+        var cls = v >= 14 ? "" : (v >= 10 ? " warn" : " bad");
+        return '<div class="bar"><span class="lbl">' + esc(p[0]) + '</span><span class="track"><span class="fill' + cls
+          + '" style="display:block;width:' + (v * 5) + '%"></span></span><span class="num">' + esc(String(Math.round(v))) + "/20</span></div>";
+      }).join("") + "</div>";
+      html += '<p class="note tiny" style="margin:10px 0 0">Checked ' + esc(when(a.analyzed_at || a.created_at))
+        + (rHealth.data.matched_version === false ? " on an earlier version of the itinerary. Run a new check to include recent changes." : ".") + "</p>";
+    } else if (rHealth.ok) {
+      html += '<p class="note" style="margin:0">No check has been run on this trip yet. '
+        + (viewer ? "Someone who can edit the trip can run one." : "Choose Run check to see how the plan holds up.") + "</p>";
+    } else {
+      html += '<p class="note" style="margin:0">The trip health score couldn\'t be loaded right now.</p>';
+    }
+
+    // Readiness
+    if (ready && Array.isArray(ready.areas)) {
+      var ov = ready.overall_readiness;
+      var areas = ready.areas.filter(function (x) { return !(x.key === "documents" && x.status === "UNKNOWN"); });
+      html += '<div class="subhead">Readiness <span class="chip ' + (READY_CHIP[ov] || "mute") + '">' + esc(READY_LABEL[ov] || "Not enough to tell yet") + "</span></div>"
+        + '<div class="derived">' + areas.map(function (x) {
+          return '<div class="d"><span class="chip ' + (READY_CHIP[x.status] || "mute") + '">' + esc(READY_LABEL[x.status] || "Unknown") + "</span>"
+            + '<div class="txt"><strong>' + esc(x.label || x.key) + "</strong><span>" + esc(x.detail || "") + "</span></div></div>";
+        }).join("") + "</div>";
+    }
+
+    // Day by day
+    var f = rFriction.ok && rFriction.data ? rFriction.data.analysis : null;
+    var days = f && Array.isArray(f.scores) ? f.scores.slice() : [];
+    if (days.length) {
+      days.sort(function (x, y) { return (Number(x.day_number) || 0) - (Number(y.day_number) || 0); });
+      html += '<div class="subhead">Day by day</div><p class="note tiny" style="margin:0 0 4px">How demanding each day looks to pull off, from easy to very demanding.</p>'
+        + days.map(function (d) {
+          var st = d.friction_score == null ? "UNKNOWN" : String(d.friction_status || "UNKNOWN").toUpperCase();
+          var dateOk = validDate(d.date);
+          var factors = Array.isArray(d.top_factors) ? d.top_factors.filter(Boolean) : [];
+          return '<div class="it" style="grid-template-columns:64px minmax(0,1fr) auto">'
+            + '<div class="clock">Day ' + esc(String(d.day_number != null ? d.day_number : "?")) + "</div>"
+            + '<div class="what"><b>' + esc(dateOk ? dayLabel(d.date) : (d.is_arrival_day ? "Arrival day" : d.is_departure_day ? "Departure day" : "")) + "</b>"
+            + (d.explanation ? "<span>" + esc(d.explanation) + "</span>" : "")
+            + (factors.length ? "<span>" + esc(factors.join(" · ")) + "</span>" : "") + "</div>"
+            + '<div class="acts"><span class="chip ' + (FRICTION_CHIP[st] || "mute") + '"'
+            + (d.friction_score != null ? ' title="' + esc(String(d.friction_score)) + ' out of 100"' : "") + ">"
+            + esc(FRICTION_LABEL[st] || "Not scored") + "</span></div></div>";
+        }).join("");
+    }
+
+    // Open issues
+    var issues = rIssues.ok && rIssues.data && Array.isArray(rIssues.data.issues) ? rIssues.data.issues : null;
+    if (issues && issues.length) {
+      html += '<div class="subhead">Things to look at <span class="chip mute">' + esc(String(issues.length)) + "</span></div>";
+      var sevs = SEV_ORDER.concat(issues.map(function (i) { return i.severity; }).filter(function (s) { return SEV_ORDER.indexOf(s) < 0; }));
+      sevs.filter(function (s, i) { return sevs.indexOf(s) === i; }).forEach(function (sev) {
+        issues.filter(function (i) { return i.severity === sev; }).forEach(function (i) {
+          var desc = i.short_description || i.detailed_explanation || i.description || "";
+          var more = i.detailed_explanation && i.detailed_explanation !== desc ? i.detailed_explanation : "";
+          var dayList = Array.isArray(i.affected_days) ? i.affected_days.filter(function (n) { return n != null; }) : [];
+          html += '<div class="res"><div class="top"><span class="name">' + esc(i.title || "Something to check") + "</span>"
+            + '<span class="chip ' + (SEV_CHIP[sev] || "mute") + '">' + esc(SEV_LABEL[sev] || "Note") + "</span></div>"
+            + (desc ? '<p style="margin:8px 0 0;font-size:14px">' + esc(desc) + "</p>" : "")
+            + (more ? '<p class="note" style="margin:6px 0 0">' + esc(more) + "</p>" : "")
+            + (i.recommended_action ? '<p class="note" style="margin:8px 0 0"><strong>Suggested fix:</strong> ' + esc(i.recommended_action) + "</p>" : "")
+            + (dayList.length ? '<p class="note tiny" style="margin:6px 0 0">' + (dayList.length === 1 ? "Day " : "Days ") + esc(dayList.join(", ")) + "</p>" : "")
+            + "</div>";
+        });
+      });
+    } else if (issues && a) {
+      html += '<div class="subhead">Things to look at</div><p class="note" style="margin:0">No open issues right now.</p>';
+    }
+    $("healthBody").innerHTML = html;
+  }
+
+  $("runHealth").addEventListener("click", async function () {
+    var t = currentTrip();
+    if (!t || health.running) return;
+    var tripId = t.id;
+    var btn = this;
+    health.running = true;
+    btn.disabled = true;
+    setMsg("healthMsg", "");
+    $("healthProgress").textContent = "Checking your trip… this can take up to a minute.";
+    $("healthProgress").hidden = false;
+    var body = { trip_id: tripId, force_refresh: true };
+    var msg = "", isErr = false;
+    try {
+      var first = await Promise.all([fnPost("analyze-trip-health", body), fnPost("analyze-daily-friction", body)]);
+      var denied = first.filter(function (x) { return x.status === 403; })[0];
+      if (denied) {
+        msg = (denied.data && denied.data.message) || "Viewers can see this trip's health but can't run a new check.";
+        isErr = true;
+      } else if (first[0].ok && first[0].data && first[0].data.status === "no_itinerary") {
+        msg = "Add something to your itinerary to see this.";
+      } else {
+        var third = await fnPost("detect-trip-issues", body);
+        if (third.status === 403) {
+          msg = (third.data && third.data.message) || "Viewers can see this trip's health but can't run a new check.";
+          isErr = true;
+        } else {
+          var failed = [first[0], first[1], third].filter(function (x) { return !x.ok; }).length;
+          if (failed === 3) { msg = "The check couldn't finish right now. Try again in a few minutes."; isErr = true; }
+          else if (failed) { msg = "Part of the check couldn't finish, so some of what's below may be older. Try again in a few minutes."; isErr = true; }
+          else msg = "Check complete.";
+        }
+      }
+    } catch (e) {
+      msg = NETWORK_HINT; isErr = true;
+    }
+    $("healthProgress").hidden = true;
+    btn.disabled = false;
+    if ((currentTrip() || {}).id !== tripId) { health.running = false; return; }
+    await loadHealth();
+    health.running = false;
+    setMsg("healthMsg", msg, isErr);
+  });
+
+  // ── itinerary history ───────────────────────────────────────
+  var hist = { seq: 0, tripId: null, rows: [] };
+  var histTimer = { t: null };
+  var METHOD_LABEL = {
+    AI_GENERATED: "AI plan", REGENERATED: "AI plan", RESTORED_VERSION: "Restored", RESTORE: "Restored",
+    BUDGET_OPTIMIZATION: "Budget change", PACE_OPTIMIZATION: "Pace change", GEOGRAPHIC_OPTIMIZATION: "Route change",
+    MANUAL: "Edited", USER_EDIT: "Edited", COPILOT: "Copilot change", REPLAN: "Suggested change"
+  };
+  function methodLabel(m) {
+    if (!m) return "";
+    if (METHOD_LABEL[m]) return METHOD_LABEL[m];
+    var s = String(m).replace(/_/g, " ").toLowerCase();
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+  function activeVersion() { return hist.rows.filter(function (v) { return v.is_active; })[0] || null; }
+
+  async function loadHistory() {
+    if (!$("histDetails").open) return;
+    var t = currentTrip();
+    if (!t || !session) return;
+    var tripId = t.id;
+    var seq = ++hist.seq;
+    if (hist.tripId !== tripId) {
+      hist.tripId = tripId;
+      hist.rows = [];
+      setMsg("histMsg", "");
+      $("histList").innerHTML = '<p class="note" style="margin:0">Loading&hellip;</p>';
+    }
+    var r;
+    try {
+      r = await call("GET", "/rest/v1/itinerary_versions?trip_id=eq." + encodeURIComponent(tripId)
+        + "&select=id,version_name,version_number,created_at,is_active,creation_method,parent_version_id,change_summary"
+        + "&order=created_at.desc&limit=30");
+    } catch (e) {
+      if (seq === hist.seq) setMsg("histMsg", NETWORK_HINT, true);
+      return;
+    }
+    if (seq !== hist.seq || (currentTrip() || {}).id !== tripId) return;
+    if (!r.ok) {
+      $("histList").innerHTML = "";
+      setMsg("histMsg", "The history couldn't be loaded right now.", true);
+      return;
+    }
+    hist.rows = Array.isArray(r.data) ? r.data : [];
+    renderHistory();
+  }
+
+  function renderHistory() {
+    if (!hist.rows.length) {
+      $("histList").innerHTML = '<p class="note" style="margin:0">No saved versions yet. A version is saved each time the AI planner, the copilot or a restore changes the itinerary. Changes made here with Add item, Edit or Remove aren\'t saved as versions.</p>';
+      return;
+    }
+    var canEdit = myRole() !== "viewer";
+    $("histList").innerHTML = hist.rows.map(function (v) {
+      var name = v.version_name || ("Version " + (v.version_number != null ? v.version_number : ""));
+      var meta = [v.version_number != null ? "Version " + v.version_number : "", methodLabel(v.creation_method), when(v.created_at)].filter(Boolean);
+      var summary = Array.isArray(v.change_summary) ? v.change_summary.filter(Boolean).join(" · ") : "";
+      var acts = "";
+      if (v.is_active) {
+        acts += '<span class="chip ok">Current</span>';
+        if (canEdit && v.parent_version_id) acts += '<button class="tiny ghost" type="button" data-undo="' + esc(v.id) + '">Undo last change</button>';
+      } else if (canEdit) {
+        acts += '<button class="tiny ghost" type="button" data-restore="' + esc(v.id) + '" data-num="' + esc(String(v.version_number != null ? v.version_number : "")) + '">Restore</button>';
+      }
+      return '<div class="it" style="grid-template-columns:minmax(0,1fr) auto;align-items:center"><div class="what"><b>' + esc(name) + "</b>"
+        + "<span>" + esc(meta.join(" · ")) + "</span>"
+        + (summary && summary !== name ? "<span>" + esc(summary) + "</span>" : "")
+        + '</div><div class="acts" style="align-items:center;flex-wrap:wrap;justify-content:flex-end">' + acts + "</div></div>";
+    }).join("");
+  }
+
+  $("histDetails").addEventListener("toggle", function () { if (this.open) loadHistory(); });
+
+  $("histList").addEventListener("click", async function (e) {
+    var btn = e.target.closest("[data-restore],[data-undo]");
+    if (!btn || btn.disabled) return;
+    var restoring = btn.hasAttribute("data-restore");
+    if (!armButton(btn, restoring ? "Tap again to restore" : "Tap again to undo", histTimer)) return;
+    clearTimeout(histTimer.t);
+    btn.disabled = true;
+    setMsg("histMsg", "");
+    var active = activeVersion();
+    var r;
+    try {
+      r = restoring
+        ? await rpc("itinerary_restore_version", { p_version_id: btn.getAttribute("data-restore"), p_expect_active: active ? active.id : null })
+        : await rpc("itinerary_undo_change", { p_version_id: btn.getAttribute("data-undo") });
+    } catch (err) {
+      btn.disabled = false;
+      disarmButton(btn);
+      setMsg("histMsg", NETWORK_HINT, true);
+      return;
+    }
+    if (!rpcOk(r)) {
+      btn.disabled = false;
+      disarmButton(btn);
+      setMsg("histMsg", versionMsg(r), true);
+      if (versionCode(r) === "STALE") loadItinerary();
+      return;
+    }
+    var num = btn.getAttribute("data-num");
+    setMsg("histMsg", restoring
+      ? "Restored. The itinerary now matches " + (num ? "version " + num : "that version") + "."
+      : "Undone. The itinerary is back to how it was before that change.", false);
+    loadItinerary();
+    loadDerived();
+  });
+
+  // ── AI planner ──────────────────────────────────────────────
+  var plan = { tripId: null, data: null, busy: false, adding: false };
+  var planTimer = { t: null };
+  function planKey(id) { return "ai_plan_" + id; }
+  function planSave(id, d) {
+    try { localStorage.setItem(planKey(id), JSON.stringify(d)); } catch (e) { /* private window */ }
+  }
+  function planRead(id) {
+    try {
+      var v = JSON.parse(localStorage.getItem(planKey(id)) || "null");
+      return v && Array.isArray(v.days) ? v : null;
+    } catch (e) { return null; }
+  }
+  function splitList(s) {
+    return String(s || "").split(/[,;\n]/).map(function (x) { return x.trim().slice(0, 200); }).filter(Boolean).slice(0, 25);
+  }
+  function validDate(s) {
+    return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s + "T12:00:00Z"));
+  }
+  // "9:00 AM", "9am", "09:00", "21:30", "9.30 pm", "~10:00" -> "HH:MM" (24h), else null.
+  function toHHMM(v) {
+    if (typeof v !== "string") return null;
+    var s = v.trim().replace(/^(~|approx\.?|approximately|about|around|ca\.?)\s*/i, "");
+    var h, mi, m = s.match(/^(\d{1,2})(?:[:.h](\d{2}))?(?::\d{2})?\s*([ap])\.?\s*m\.?$/i);
+    if (m) {
+      h = +m[1]; mi = m[2] ? +m[2] : 0;
+      if (h < 1 || h > 12 || mi > 59) return null;
+      h = (h % 12) + (m[3].toLowerCase() === "p" ? 12 : 0);
+    } else {
+      m = s.match(/^(\d{1,2})[:h](\d{2})(?::\d{2})?$/);
+      if (!m) return null;
+      h = +m[1]; mi = +m[2];
+      if (h > 23 || mi > 59) return null;
+    }
+    return String(h).padStart(2, "0") + ":" + String(mi).padStart(2, "0");
+  }
+  function locText(l) {
+    if (!l) return "";
+    if (typeof l === "string") return l.trim();
+    if (typeof l === "object") return String(l.name || l.address || "").trim();
+    return "";
+  }
+  var PLAN_CAT = { arrival: "Arrival", departure: "Departure", hotel: "Hotel", meal: "Meal", attraction: "Sight",
+    activity: "Activity", transport: "Getting around", rest: "Rest", "free-time": "Free time" };
+  // The web itinerary shows items by type; these are the types its own form uses.
+  function typeFor(cat) {
+    var c = String(cat || "").toLowerCase();
+    if (c === "meal") return "meal";
+    if (c === "transport" || c === "arrival" || c === "departure") return "transport";
+    if (c === "hotel") return "lodging";
+    return "activity";
+  }
+  function fmtDur(n) {
+    n = Math.round(Number(n));
+    if (!(n > 0)) return "";
+    var h = Math.floor(n / 60), m = n % 60;
+    return h ? (h + " hr" + (m ? " " + m + " min" : "")) : (m + " min");
+  }
+
+  function planOnTripChange() {
+    var t = currentTrip();
+    if (!t) return;
+    if (plan.tripId !== t.id) {
+      plan.tripId = t.id;
+      plan.data = planRead(t.id);
+      setMsg("planErr", "");
+      $("planDone").hidden = true;
+      if (!plan.busy) $("planProgress").hidden = true;
+    }
+    $("planDatesNote").hidden = !!(validDate(t.start_date) && validDate(t.end_date));
+    renderPlan();
+  }
+
+  function renderPlan() {
+    var d = plan.data;
+    if (!d || !Array.isArray(d.days) || !d.days.length) {
+      $("planResult").innerHTML = "";
+      $("planAddRow").hidden = true;
+      return;
+    }
+    var s = d.trip_summary || {};
+    var days = d.days.slice().sort(function (x, y) { return (Number(x.day_number) || 0) - (Number(y.day_number) || 0); });
+    var html = '<p class="note" style="margin:0">Planned ' + esc(when(d.at))
+      + (s.travel_style_summary ? ". " + esc(s.travel_style_summary) : ".") + "</p>";
+    html += days.map(function (day, idx) {
+      var n = day.day_number != null ? day.day_number : idx + 1;
+      var acts = Array.isArray(day.activities) ? day.activities : [];
+      return '<div class="daybar"><b>' + esc(day.day_label || ("Day " + n)) + "</b><i>"
+        + esc(validDate(day.date) ? dayLabel(day.date) : "No date") + "</i></div>"
+        + (acts.length ? acts.map(function (a) {
+          var bits = [locText(a.location), PLAN_CAT[a.category] || a.category || "", fmtDur(a.duration_minutes)].filter(Boolean);
+          return '<div class="it" style="grid-template-columns:64px minmax(0,1fr)">'
+            + '<div class="clock">' + esc(toHHMM(a.time) || "--:--") + "</div>"
+            + '<div class="what"><b>' + esc(a.title || a.name || "(untitled)") + "</b>"
+            + (bits.length ? "<span>" + esc(bits.join(" · ")) + "</span>" : "")
+            + (a.description ? "<span>" + esc(a.description) + "</span>" : "") + "</div></div>";
+        }).join("") : '<p class="note" style="margin:4px 0 0">Nothing planned for this day.</p>');
+    }).join("");
+    if (s.cost_note) html += '<p class="note tiny" style="margin:12px 0 0">' + esc(s.cost_note) + "</p>";
+    $("planResult").innerHTML = html;
+    $("planAddRow").hidden = false;
+    var added = !!d.added_version_id;
+    $("planAdd").disabled = added || plan.adding;
+    $("planAdd").textContent = added ? "Added to your trip" : "Add to my trip";
+  }
+
+  function planItems(d) {
+    var items = [], skippedDays = 0, skippedActs = 0;
+    (d.days || []).forEach(function (day) {
+      var acts = Array.isArray(day.activities) ? day.activities : [];
+      if (!validDate(day.date)) { if (acts.length) skippedDays++; return; }
+      acts.forEach(function (a) {
+        var title = String((a && (a.title || a.name)) || "").trim();
+        if (!title) { skippedActs++; return; }
+        var it = { title: title.slice(0, 300), date: day.date };
+        var tm = toHHMM(a.time);
+        if (tm) it.time = tm;
+        var dur = Math.round(Number(a.duration_minutes));
+        if (dur >= 1 && dur <= 1440) it.duration_min = dur;
+        var loc = locText(a.location);
+        if (loc) it.location = loc.slice(0, 300);
+        if (a.category) { it.category = String(a.category).slice(0, 40); it.type = typeFor(a.category); }
+        if (a.description) it.notes = String(a.description).slice(0, 2000);
+        items.push(it);
+      });
+    });
+    return { items: items, skippedDays: skippedDays, skippedActs: skippedActs };
+  }
+
+  $("planBtn").addEventListener("click", async function () {
+    var t = currentTrip();
+    if (!t || plan.busy) return;
+    setMsg("planErr", "");
+    var prefs = {};
+    // generate-itinerary doesn't read the trip itself; the model only sees
+    // what's in preferences, so the trip's destination and dates go in too.
+    if (t.destination) prefs.destination = t.destination;
+    if (validDate(t.start_date)) prefs.start_date = t.start_date;
+    if (validDate(t.end_date)) prefs.end_date = t.end_date;
+    if (prefs.start_date && prefs.end_date) {
+      var nd = Math.round((new Date(prefs.end_date + "T12:00:00Z") - new Date(prefs.start_date + "T12:00:00Z")) / 86400000) + 1;
+      if (nd >= 1 && nd <= 60) prefs.total_days = nd;
+    }
+    var pace = $("planPace").value;
+    if (pace) prefs.pace = pace;
+    var w = $("planWalk").value.trim();
+    if (w) {
+      var wn = Number(w);
+      if (!/^\d{1,3}$/.test(w) || wn < 1 || wn > 600) { setMsg("planErr", "Enter the walking time as a number of minutes, like 20.", true); return; }
+      prefs.walking_tolerance_minutes = wn;
+    }
+    var interests = splitList($("planInterests").value);
+    if (interests.length) prefs.interests = interests;
+    prefs.must_do = splitList($("planMust").value);
+    prefs.avoid = splitList($("planAvoid").value);
+    var budget = $("planBudget").value.trim();
+    if (budget) prefs.budget_note = budget.slice(0, 300);
+
+    var tripId = t.id;
+    var btn = this;
+    plan.busy = true;
+    btn.disabled = true;
+    btn.textContent = "Planning…";
+    $("planDone").hidden = true;
+    $("planProgress").textContent = "Building your plan… this can take up to a minute.";
+    $("planProgress").hidden = false;
+    var r = null, netFail = false;
+    try {
+      r = await fnPost("generate-itinerary", { trip_id: tripId, preferences: prefs });
+    } catch (e) { netFail = true; }
+    plan.busy = false;
+    btn.disabled = false;
+    btn.textContent = "Plan my trip";
+    $("planProgress").hidden = true;
+    var ok = r && r.ok && r.data && Array.isArray(r.data.days) && r.data.days.length;
+    if (!ok) {
+      if ((currentTrip() || {}).id === tripId) {
+        setMsg("planErr", netFail ? NETWORK_HINT
+          : (r && r.status === 401) ? VERSION_MSG.UNAUTHORIZED
+          : "We couldn't build a plan right now. Nothing on your trip was changed. Try again in a minute.", true);
+      }
+      return;
+    }
+    var saved = { at: new Date().toISOString(), trip_summary: r.data.trip_summary || null, days: r.data.days };
+    planSave(tripId, saved);
+    if ((currentTrip() || {}).id === tripId) {
+      plan.data = saved;
+      renderPlan();
+    }
+  });
+
+  $("planAdd").addEventListener("click", async function () {
+    var t = currentTrip();
+    if (!t || !plan.data || plan.adding || plan.data.added_version_id) return;
+    setMsg("planErr", "");
+    $("planDone").hidden = true;
+    var conv = planItems(plan.data);
+    if (!conv.items.length) {
+      setMsg("planErr", conv.skippedDays
+        ? "None of the plan's days have dates, so nothing could be added. Give the trip start and end dates with Edit on the Trip card, then plan again."
+        : "This plan doesn't have any activities to add.", true);
+      return;
+    }
+    if (conv.items.length > 150) {
+      setMsg("planErr", "This plan has more than 150 activities, which is more than can be added at once. Try a shorter trip or a more relaxed pace.", true);
+      return;
+    }
+    var tripId = t.id, saved = plan.data, btn = this;
+    plan.adding = true;
+    btn.disabled = true;
+    btn.textContent = "Adding…";
+    var r;
+    try {
+      r = await rpc("itinerary_add_items", { p_trip_id: tripId, p_items: conv.items, p_version_name: "AI plan" });
+    } catch (e) {
+      plan.adding = false;
+      renderPlan();
+      setMsg("planErr", NETWORK_HINT, true);
+      return;
+    }
+    plan.adding = false;
+    if (!rpcOk(r)) {
+      renderPlan();
+      setMsg("planErr", versionMsg(r), true);
+      return;
+    }
+    saved.added_version_id = r.data.new_version_id || "added";
+    planSave(tripId, saved);
+    var n = Number(r.data.inserted) || conv.items.length;
+    var text = "Added " + n + (n === 1 ? " item" : " items") + " to your trip.";
+    if (conv.skippedDays) text += " " + conv.skippedDays + (conv.skippedDays === 1 ? " day had" : " days had") + " no date, so " + (conv.skippedDays === 1 ? "it was" : "they were") + " skipped.";
+    if (conv.skippedActs) text += " " + conv.skippedActs + (conv.skippedActs === 1 ? " activity had" : " activities had") + " no name and " + (conv.skippedActs === 1 ? "was" : "were") + " skipped.";
+    if ((currentTrip() || {}).id === tripId) {
+      renderPlan();
+      $("planDoneText").textContent = text;
+      $("planUndo").hidden = !r.data.new_version_id;
+      $("planUndo").disabled = false;
+      $("planUndo").dataset.version = r.data.new_version_id || "";
+      $("planUndo").dataset.trip = tripId;
+      disarmButton($("planUndo"));
+      $("planDone").hidden = false;
+      loadItinerary();
+      loadDerived();
+    }
+  });
+
+  $("planUndo").addEventListener("click", async function () {
+    var btn = this, vid = btn.dataset.version, tripId = btn.dataset.trip;
+    if (!vid || btn.disabled) return;
+    if (!armButton(btn, "Tap again to undo", planTimer)) return;
+    clearTimeout(planTimer.t);
+    btn.disabled = true;
+    setMsg("planErr", "");
+    var r;
+    try {
+      r = await rpc("itinerary_undo_change", { p_version_id: vid });
+    } catch (e) {
+      btn.disabled = false;
+      disarmButton(btn);
+      setMsg("planErr", NETWORK_HINT, true);
+      return;
+    }
+    if (!rpcOk(r)) {
+      btn.disabled = false;
+      disarmButton(btn);
+      setMsg("planErr", versionMsg(r), true);
+      return;
+    }
+    var saved = planRead(tripId);
+    if (saved) { delete saved.added_version_id; planSave(tripId, saved); }
+    if (plan.data && plan.tripId === tripId) delete plan.data.added_version_id;
+    btn.hidden = true;
+    disarmButton(btn);
+    $("planDoneText").textContent = "Undone. The plan's items were taken off your trip.";
+    if ((currentTrip() || {}).id === tripId) {
+      renderPlan();
+      loadItinerary();
+      loadDerived();
+    }
+  });
 
   session = loadSession();
   var inviteTok = readInviteToken();
