@@ -239,6 +239,19 @@
   .daybar b { font-size: 15px; font-weight: 700; color: var(--ink); }
   .daybar i { font-style: normal; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
+  /* ── itinerary select mode (bulk remove) ──────────────────── */
+  .selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px;
+            border-radius: 12px; background: var(--card-2); margin-bottom: 10px; }
+  .selbar #itSelCount { flex: 1 1 auto; min-width: 0; }
+  .selecting .it { padding-left: 8px; padding-right: 8px; border-radius: 10px; cursor: pointer; }
+  .selecting .it.picked { background: var(--accent-soft); }
+  .it .pick { width: 22px; height: 22px; min-height: 0; padding: 0; margin: 0; accent-color: var(--accent); cursor: pointer; }
+  .daybar button { margin-left: auto; }
+
+  /* ── map ──────────────────────────────────────────────────── */
+  .mapbox { height: 300px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line-2); margin-bottom: 8px; }
+  .mapbox .leaflet-popup-content { font-size: 13px; }
+
   .hazard { border-left: 3px solid var(--warn); background: var(--warn-soft); color: var(--warn);
             padding: 10px 12px; border-radius: 0 10px 10px 0; font-size: 13.5px; margin-top: 12px; }
 
@@ -540,6 +553,16 @@
         </div>
         <p class="err" id="itErr" style="margin:10px 0 0" hidden></p>
       </form>
+      <div id="itTools" class="row" style="gap:8px;margin-bottom:10px" hidden>
+        <div class="shrink"><button id="itSelect" class="ghost tiny" type="button" hidden>Select</button></div>
+        <div class="shrink"><button id="itCal" class="ghost tiny" type="button" hidden>Add to calendar</button></div>
+      </div>
+      <div id="itSelBar" class="selbar" hidden>
+        <span id="itSelCount" class="note">0 selected</span>
+        <button id="itSelRemove" class="danger tiny" type="button" disabled>Remove selected (0)</button>
+        <button id="itSelDone" class="ghost tiny" type="button">Done</button>
+      </div>
+      <p class="err" id="itSelMsg" style="margin:0 0 10px" hidden></p>
       <div id="itList"></div>
       <details id="histDetails" style="margin-top:16px">
         <summary class="note" style="cursor:pointer">History</summary>
@@ -547,6 +570,24 @@
           <div id="histList"></div>
           <p class="note tiny" style="margin:10px 0 0">Restoring puts the itinerary back the way it was in that version. Anything added or changed since then is replaced.</p>
           <p class="note" id="histMsg" style="margin:8px 0 0" hidden></p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ── map ───────────────────────────────────────────────── -->
+  <section class="panel" id="mapPanel" hidden style="margin-top:16px">
+    <header>
+      <h2>Map</h2>
+      <span id="mapCount" class="chip mute">&mdash;</span>
+    </header>
+    <div class="body">
+      <details id="mapDetails">
+        <summary class="note" style="cursor:pointer">Show the map</summary>
+        <div style="margin-top:8px">
+          <div id="mapBox" class="mapbox" hidden></div>
+          <p class="note" id="mapMsg" style="margin:8px 0 0" hidden></p>
+          <div id="mapList"></div>
         </div>
       </details>
     </div>
@@ -1397,6 +1438,7 @@
     renderAuth();
     $("tripPanel").hidden = true;
     $("itinPanel").hidden = true;
+    $("mapPanel").hidden = true;
     $("healthPanel").hidden = true;
     $("aiPanel").hidden = true;
     $("fxPanel").hidden = true;
@@ -1441,6 +1483,7 @@
     $("tripPanel").hidden = false;
     $("workArea").hidden = trips.length === 0;
     $("itinPanel").hidden = trips.length === 0;
+    $("mapPanel").hidden = trips.length === 0;
     $("healthPanel").hidden = trips.length === 0;
     $("aiPanel").hidden = trips.length === 0;
     $("expPanel").hidden = trips.length === 0;
@@ -1487,7 +1530,9 @@
     loadItinerary();
     fxOnTripChange();
     planOnTripChange();
-    loadExpenses().then(loadPeople, loadPeople);
+    // The role comes from the expense group's members; once it is known,
+    // Select / Add to calendar are shown or hidden to match.
+    loadExpenses().then(function () { itToolsSync(); return loadPeople(); }, loadPeople);
     loadDocs();
     loadAlerts();
     $("tripForm").hidden = true;
@@ -1758,30 +1803,40 @@
   // ── itinerary ──────────────────────────────────────────────
   var itinerary = [];
   var editingItem = null;
+  // Select mode (bulk remove). ids is a set of selected item ids; tripId
+  // pins the selection to the trip it was made on.
+  var itSel = { on: false, ids: {}, tripId: null, busy: false };
+  var IT_SEL_MAX = 150;
+  var mapState = { map: null, layer: null, seq: 0 };
 
   async function loadItinerary() {
     var t = currentTrip();
     if (!t) return;
     var r = await call("GET", "/rest/v1/itinerary_items?trip_id=eq." + encodeURIComponent(t.id)
-      + "&select=id,title,type,date,start_time,end_time,location,country_code,outdoor,fixed,must_do"
+      + "&select=id,title,type,date,start_time,end_time,location,country_code,outdoor,fixed,must_do,lat,lng"
       + "&order=date.asc,start_time.asc");
     // Health readers and history follow every itinerary (re)load: trip
     // selected, web edits, copilot changes, restores and AI plans.
     loadHistory();
     loadHealth();
     if (!r.ok) {
-      $("itList").innerHTML = '<p class="err">Could not load the itinerary. ' + esc(r.detail || ("HTTP " + r.status)) + "</p>";
+      $("itList").innerHTML = '<p class="err">The itinerary couldn\'t be loaded right now. Try again in a moment.</p>';
       $("itCount").textContent = "error";
       $("itCount").className = "chip bad";
       return;
     }
     itinerary = r.data || [];
+    itSelPrune(t.id);
     renderItinerary();
+    renderMap();
   }
 
   function renderItinerary() {
     $("itCount").textContent = itinerary.length + (itinerary.length === 1 ? " item" : " items");
     $("itCount").className = "chip " + (itinerary.length ? "acc" : "mute");
+    itToolsSync();
+    var sel = itSel.on;
+    $("itList").classList.toggle("selecting", sel);
     if (!itinerary.length) {
       $("itList").innerHTML = '<p class="note" style="margin:0">Nothing scheduled yet. Add the first thing you plan to do.</p>';
       return;
@@ -1790,21 +1845,26 @@
     itinerary.forEach(function (i) { (days[i.date || "undated"] = days[i.date || "undated"] || []).push(i); });
     var keys = Object.keys(days).sort();
     $("itList").innerHTML = keys.map(function (d) {
-      var head = '<div class="daybar"><b>' + esc(dayLabel(d)) + "</b><i>" + esc(d) + "</i></div>";
+      var head = '<div class="daybar"><b>' + esc(dayLabel(d)) + "</b><i>" + esc(d) + "</i>"
+        + (sel ? '<button class="ghost tiny" type="button" data-day="' + esc(d) + '">Select day</button>' : "") + "</div>";
       return head + days[d].map(function (i) {
         var flags = [];
         if (i.must_do) flags.push("must do");
         if (i.fixed) flags.push("fixed");
         if (i.outdoor) flags.push("outdoors");
         if (i.country_code) flags.push(i.country_code);
+        var acts = sel
+          ? '<div class="acts"><input class="pick" type="checkbox" data-pick aria-label="Select ' + esc(i.title || "this item") + '"></div>'
+          : '<div class="acts"><button class="ghost tiny" data-act="edit" type="button">Edit</button>'
+            + '<button class="danger tiny" data-act="del" type="button">Remove</button></div>';
         return '<div class="it" data-id="' + esc(i.id) + '">'
           + '<div class="clock">' + esc(clock(i.start_time)) + (i.end_time ? "&ndash;" + esc(clock(i.end_time)) : "") + "</div>"
           + '<div class="what"><b>' + esc(i.title || "(untitled)") + "</b>"
           + "<span>" + esc([i.type, i.location].filter(Boolean).join(" · ")) + (flags.length ? "  " + esc(flags.join(" · ")) : "") + "</span></div>"
-          + '<div class="acts"><button class="ghost tiny" data-act="edit" type="button">Edit</button>'
-          + '<button class="danger tiny" data-act="del" type="button">Remove</button></div></div>';
+          + acts + "</div>";
       }).join("");
     }).join("");
+    if (sel) itSelPaint();
   }
 
   // FIX 2026-09-23: times are shown and saved in the TRIP's time zone
@@ -2112,7 +2172,7 @@
     $("toastSep").hidden = !toast.versionId;
     $("toastUndo").disabled = false;
     $("toast").hidden = false;
-    toast.t = setTimeout(hideToast, toast.versionId ? 10000 : 6000);
+    toast.t = setTimeout(hideToast, toast.versionId ? 15000 : 6000);
   }
   function hideToast() {
     clearTimeout(toast.t);
@@ -2141,6 +2201,285 @@
     loadItinerary();
     loadDerived();
   });
+
+  // ── itinerary: Select mode and bulk remove (web wave 4) ─────
+  // Select turns each row into a checkbox (tap the row or the box) and adds a
+  // "Select day" button to each day. "Remove selected (N)" asks for a second
+  // tap, then sends every id in one itinerary_delete_items call (1 to 150
+  // ids, all on this trip). That call deletes them and saves one new
+  // itinerary version, whose new_version_id is what the toast's Undo rolls
+  // back through itinerary_undo_change. Hidden for trip viewers.
+  var itSelTimer = { t: null };
+  function itCanEdit() { return myRole() !== "viewer"; }
+  function itIsOwner() {
+    var t = currentTrip();
+    return !!(t && session && t.user_id && t.user_id === session.user_id);
+  }
+  function itToolsSync() {
+    var canEdit = itCanEdit();
+    if (itSel.on && (!canEdit || !itinerary.length)) { itSel.on = false; itSel.ids = {}; }
+    $("itSelect").hidden = !(canEdit && itinerary.length && !itSel.on);
+    $("itCal").hidden = !(itIsOwner() && !itSel.on);
+    $("itTools").hidden = $("itSelect").hidden && $("itCal").hidden;
+    $("itSelBar").hidden = !itSel.on;
+    if (!itSel.on) setMsg("itSelMsg", "");
+    $("toggleItAdd").hidden = itSel.on;
+    if (itSel.on) itSelBarSync();
+  }
+  function itSelCount() { return Object.keys(itSel.ids).length; }
+  function itSelBarSync() {
+    var n = itSelCount(), btn = $("itSelRemove");
+    $("itSelCount").textContent = n + " selected";
+    if (!btn.dataset.armed) btn.textContent = "Remove selected (" + n + ")";
+    btn.disabled = itSel.busy || n === 0 || n > IT_SEL_MAX;
+    if (n > IT_SEL_MAX) setMsg("itSelMsg", "You can remove up to " + IT_SEL_MAX + " items at a time. Unselect a few and try again.", true);
+    else if ($("itSelMsg").textContent.indexOf("up to " + IT_SEL_MAX) >= 0) setMsg("itSelMsg", "");
+  }
+  // Repaint checkboxes, row highlights and day buttons without rebuilding
+  // the list, so focus stays where it is.
+  function itSelPaint() {
+    Array.prototype.forEach.call($("itList").querySelectorAll(".it[data-id]"), function (row) {
+      var on = !!itSel.ids[row.getAttribute("data-id")];
+      row.classList.toggle("picked", on);
+      var box = row.querySelector("[data-pick]");
+      if (box) box.checked = on;
+    });
+    Array.prototype.forEach.call($("itList").querySelectorAll("button[data-day]"), function (b) {
+      var ids = itDayIds(b.getAttribute("data-day"));
+      var all = ids.length && ids.every(function (id) { return itSel.ids[id]; });
+      b.textContent = all ? "Clear day" : "Select day";
+    });
+    itSelUnarm();
+    itSelBarSync();
+  }
+  function itSelUnarm() {
+    var btn = $("itSelRemove");
+    if (btn.dataset.armed) { clearTimeout(itSelTimer.t); disarmButton(btn); }
+  }
+  function itDayIds(d) {
+    return itinerary.filter(function (i) { return (i.date || "undated") === d; }).map(function (i) { return i.id; });
+  }
+  function itSelEnter() {
+    itSel.on = true; itSel.ids = {}; itSel.tripId = (currentTrip() || {}).id || null;
+    $("itForm").hidden = true; editingItem = null;
+    setMsg("itSelMsg", "");
+    renderItinerary();
+  }
+  function itSelExit() {
+    itSel.on = false; itSel.ids = {}; itSel.busy = false;
+    itSelUnarm();
+    renderItinerary();
+  }
+  // After a reload: drop ids that are gone, and leave Select mode on a trip change.
+  function itSelPrune(tripId) {
+    if (itSel.on && itSel.tripId !== tripId) { itSel.on = false; itSel.ids = {}; }
+    var have = {};
+    itinerary.forEach(function (i) { have[i.id] = true; });
+    Object.keys(itSel.ids).forEach(function (id) { if (!have[id]) delete itSel.ids[id]; });
+  }
+  $("itSelect").addEventListener("click", itSelEnter);
+  $("itSelDone").addEventListener("click", itSelExit);
+  $("itList").addEventListener("click", function (e) {
+    if (!itSel.on || itSel.busy) return;
+    var dayBtn = e.target.closest("button[data-day]");
+    if (dayBtn) {
+      var ids = itDayIds(dayBtn.getAttribute("data-day"));
+      var all = ids.every(function (id) { return itSel.ids[id]; });
+      ids.forEach(function (id) { if (all) delete itSel.ids[id]; else itSel.ids[id] = true; });
+      itSelPaint();
+      return;
+    }
+    var row = e.target.closest(".it[data-id]");
+    if (!row) return;
+    var id = row.getAttribute("data-id");
+    if (itSel.ids[id]) delete itSel.ids[id]; else itSel.ids[id] = true;
+    itSelPaint();
+  });
+  $("itSelRemove").addEventListener("click", async function () {
+    var btn = this;
+    var ids = Object.keys(itSel.ids);
+    if (btn.disabled || !ids.length || ids.length > IT_SEL_MAX) return;
+    var n = ids.length;
+    if (!armButton(btn, "Tap again to remove " + n, itSelTimer)) return;
+    clearTimeout(itSelTimer.t);
+    itSel.busy = true;
+    btn.disabled = true;
+    setMsg("itSelMsg", "");
+    var r = null;
+    try {
+      r = await rpc("itinerary_delete_items", { p_item_ids: ids, p_version_name: "Removed " + n + (n === 1 ? " item" : " items") });
+    } catch (err) { r = null; }
+    itSel.busy = false;
+    disarmButton(btn);
+    if (r && rpcOk(r)) {
+      var del = typeof r.data.deleted === "number" ? r.data.deleted : n;
+      itSel.on = false; itSel.ids = {};
+      itinerary = itinerary.filter(function (i) { return ids.indexOf(i.id) < 0; });
+      renderItinerary();
+      itSaved("Removed " + del + (del === 1 ? " item" : " items"), r.data.new_version_id || null);
+      return;
+    }
+    var code = r ? versionCode(r) : "";
+    var msg = !r ? NETWORK_HINT
+      : (code === "BAD_ITEMS" || code === "NOT_FOUND")
+        ? "Some of these items were already removed or changed, so nothing was removed. The list has been refreshed; check your selection and try again."
+        : (VERSION_MSG[code] && code !== "STALE" && code !== "BAD_ITEM") ? VERSION_MSG[code]
+        : "The items couldn't be removed, and nothing was changed. Try again in a moment.";
+    setMsg("itSelMsg", msg, true);
+    itSelBarSync();
+    if (code === "BAD_ITEMS" || code === "NOT_FOUND") loadItinerary();
+  });
+
+  // ── itinerary: Add to calendar (calendar-export generate_ics) ──
+  // The calendar-export function builds the .ics server-side for the trip's
+  // OWNER only (it checks trips.user_id against the signed-in user and
+  // answers 404 otherwise), so the button is shown to the owner only. The
+  // file downloads as "<trip name>.ics". Entries with no day are left out
+  // by the backend; the toast says how many.
+  function icsFileName(t) {
+    var n = String((t && (t.name || t.title)) || "Trip")
+      .replace(/[\\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+    return (n || "Trip") + ".ics";
+  }
+  $("itCal").addEventListener("click", async function () {
+    var t = currentTrip(), btn = this;
+    if (!t || btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "Preparing…";
+    var r = null;
+    try { r = await fnPost("calendar-export", { action: "generate_ics", trip_id: t.id }); } catch (e) { r = null; }
+    btn.disabled = false;
+    btn.textContent = "Add to calendar";
+    if (!r) { showToast(NETWORK_HINT, null); return; }
+    var d = r.data || {};
+    if (!r.ok || typeof d.ics_content !== "string") {
+      showToast(r.status === 401 ? VERSION_MSG.UNAUTHORIZED
+        : r.status === 404 ? "Only the trip's owner can add it to a calendar for now."
+        : "The calendar file couldn't be made right now. Try again in a moment.", null);
+      return;
+    }
+    var count = Number(d.event_count) || 0, skipped = Number(d.skipped_without_date) || 0;
+    if (!count) { showToast("There's nothing with a day set to add to a calendar yet.", null); return; }
+    var url = URL.createObjectURL(new Blob([d.ics_content], { type: "text/calendar;charset=utf-8" }));
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = icsFileName(t);
+    a.hidden = true;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+    showToast("Downloaded " + a.download + " with " + count + (count === 1 ? " event" : " events")
+      + (skipped ? ". " + skipped + (skipped === 1 ? " entry has" : " entries have") + " no day set and " + (skipped === 1 ? "was" : "were") + " left out." : ". Open it to add the trip to your calendar."), null);
+  });
+
+  // ── map (itinerary items with lat/lng) ──────────────────────
+  // Leaflet and its stylesheet load from cdnjs only when the Map section is
+  // opened AND at least one item has a pinned location; tiles come from
+  // tile.openstreetmap.org. Items without coordinates are listed under the
+  // map with an "Open in Maps" search link built from their place text.
+  var LEAFLET_JS = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js";
+  var LEAFLET_JS_SRI = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=";
+  var LEAFLET_CSS = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css";
+  var LEAFLET_CSS_SRI = "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=";
+  var leafletP = null;
+  function loadLeaflet() {
+    if (window.L && typeof window.L.map === "function") return Promise.resolve(window.L);
+    if (leafletP) return leafletP;
+    leafletP = new Promise(function (resolve, reject) {
+      if (!document.getElementById("leafletCss")) {
+        var css = document.createElement("link");
+        css.id = "leafletCss"; css.rel = "stylesheet"; css.href = LEAFLET_CSS;
+        css.integrity = LEAFLET_CSS_SRI; css.crossOrigin = "anonymous"; css.referrerPolicy = "no-referrer";
+        document.head.appendChild(css);
+      }
+      var s = document.createElement("script");
+      var timer = setTimeout(function () { fail(); }, 15000);
+      function fail() { clearTimeout(timer); leafletP = null; s.remove(); reject(new Error("map")); }
+      s.src = LEAFLET_JS; s.integrity = LEAFLET_JS_SRI; s.crossOrigin = "anonymous"; s.referrerPolicy = "no-referrer";
+      s.onload = function () {
+        clearTimeout(timer);
+        if (window.L && typeof window.L.map === "function") resolve(window.L); else fail();
+      };
+      s.onerror = fail;
+      document.head.appendChild(s);
+    });
+    return leafletP;
+  }
+  function hasPin(i) {
+    return typeof i.lat === "number" && typeof i.lng === "number" && isFinite(i.lat) && isFinite(i.lng)
+      && Math.abs(i.lat) <= 90 && Math.abs(i.lng) <= 180 && !(i.lat === 0 && i.lng === 0);
+  }
+  function mapsLink(q) { return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q); }
+  function mapWhen(i) {
+    return [dayLabel(i.date || "undated"), i.start_time ? clock(i.start_time) : ""].filter(Boolean).join(" · ");
+  }
+  function mapRow(i) {
+    var q = hasPin(i) ? i.lat + "," + i.lng : (i.location || "").trim();
+    var link = q
+      ? '<a class="tiny" href="' + esc(mapsLink(q)) + '" target="_blank" rel="noopener">Open in Maps</a>'
+      : '<span class="note tiny">No place added</span>';
+    return '<div class="it" style="grid-template-columns:minmax(0,1fr) auto;align-items:center"><div class="what"><b>'
+      + esc(i.title || "(untitled)") + "</b><span>" + esc([mapWhen(i), i.location].filter(Boolean).join(" · ")) + "</span></div>"
+      + '<div class="acts">' + link + "</div></div>";
+  }
+  function renderMapList(rows, heading) {
+    $("mapList").innerHTML = rows.length
+      ? '<div class="subhead" style="margin-top:12px">' + esc(heading) + "</div>" + rows.map(mapRow).join("")
+      : "";
+  }
+  function renderMap() {
+    var pinned = itinerary.filter(hasPin);
+    var loose = itinerary.filter(function (i) { return !hasPin(i); });
+    $("mapCount").textContent = itinerary.length ? pinned.length + " of " + itinerary.length + " pinned" : "nothing yet";
+    $("mapCount").className = "chip " + (pinned.length ? "acc" : "mute");
+    if (!$("mapDetails").open) return;
+    var seq = ++mapState.seq;
+    if (!itinerary.length) {
+      $("mapBox").hidden = true;
+      $("mapList").innerHTML = "";
+      setMsg("mapMsg", "Nothing on the itinerary yet. Plans with a pinned location will show up here.");
+      return;
+    }
+    renderMapList(loose, "No location pinned yet");
+    if (!pinned.length) {
+      $("mapBox").hidden = true;
+      setMsg("mapMsg", "None of this trip's plans have a pinned location yet, so there's nothing to show on the map. Use Open in Maps to look a place up.");
+      return;
+    }
+    $("mapBox").hidden = false;
+    setMsg("mapMsg", "Loading the map…");
+    loadLeaflet().then(function (L) {
+      if (seq !== mapState.seq || !$("mapDetails").open) return;
+      if (!mapState.map) {
+        mapState.map = L.map($("mapBox"), { scrollWheelZoom: false });
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+        }).addTo(mapState.map);
+        mapState.layer = L.layerGroup().addTo(mapState.map);
+      }
+      mapState.map.invalidateSize();
+      mapState.layer.clearLayers();
+      var color = (getComputedStyle(document.documentElement).getPropertyValue("--accent") || "").trim() || "#c96442";
+      var pts = pinned.map(function (i) {
+        var ll = [i.lat, i.lng];
+        L.circleMarker(ll, { radius: 8, color: color, weight: 2, fillColor: color, fillOpacity: 0.8 })
+          .bindPopup("<b>" + esc(i.title || "(untitled)") + "</b><br>" + esc([mapWhen(i), i.location].filter(Boolean).join(" · ")))
+          .addTo(mapState.layer);
+        return ll;
+      });
+      if (pts.length === 1) mapState.map.setView(pts[0], 14);
+      else mapState.map.fitBounds(pts, { padding: [24, 24], maxZoom: 15 });
+      setMsg("mapMsg", "");
+    }, function () {
+      if (seq !== mapState.seq) return;
+      $("mapBox").hidden = true;
+      setMsg("mapMsg", "The map couldn't load right now. Every plan is listed below with a link to open it in Maps.", true);
+      renderMapList(pinned.concat(loose), "Your plans");
+    });
+  }
+  $("mapDetails").addEventListener("toggle", function () { if (this.open) renderMap(); });
 
   // ── currency converter (fx-rates backend, flag fx_converter) ──
   var FX_STORE = "travelos.fx.v1";
@@ -3534,7 +3873,7 @@
     try {
       r = await call("GET", "/rest/v1/itinerary_versions?trip_id=eq." + encodeURIComponent(tripId)
         + "&select=id,version_name,version_number,created_at,is_active,creation_method,parent_version_id,change_summary"
-        + "&order=created_at.desc&limit=30");
+        + "&order=version_number.desc,created_at.desc&limit=30");
     } catch (e) {
       if (seq === hist.seq) setMsg("histMsg", NETWORK_HINT, true);
       return;
