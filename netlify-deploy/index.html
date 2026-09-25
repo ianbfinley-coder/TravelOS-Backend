@@ -486,7 +486,7 @@
       <form id="tripForm" hidden style="border:1px solid var(--line);border-radius:9px;padding:12px;margin-top:12px;background:var(--card-2)">
         <div class="grid2">
           <div><label class="f" for="tName">Name</label><input id="tName" type="text" required></div>
-          <div><label class="f" for="tDest">Destination</label><input id="tDest" type="text" placeholder="Lisbon, Portugal"></div>
+          <div><label class="f" for="tDest">Destination</label><input id="tDest" type="text" placeholder="City, country"></div>
           <div><label class="f" for="tStart">Starts</label><input id="tStart" type="date"></div>
           <div><label class="f" for="tEnd">Ends</label><input id="tEnd" type="date"></div>
           <div><label class="f" for="tTz">Time zone</label><select id="tTz"></select></div>
@@ -527,7 +527,7 @@
           <div><label class="f" for="iCountry">Country code</label><input id="iCountry" type="text" maxlength="2" placeholder="PT" class="mono"></div>
           <div><label class="f" for="iStart">Starts</label><input id="iStart" type="time"></div>
           <div><label class="f" for="iEnd">Ends</label><input id="iEnd" type="time"></div>
-          <div style="grid-column:1/-1"><label class="f" for="iLoc">Where</label><input id="iLoc" type="text" placeholder="Praça do Império, Belém"></div>
+          <div style="grid-column:1/-1"><label class="f" for="iLoc">Where</label><input id="iLoc" type="text" placeholder="Address or place name"></div>
         </div>
         <div class="row" style="margin-top:12px;gap:16px">
           <div class="shrink"><label style="display:flex;gap:7px;align-items:center;font-size:13px"><input id="iOutdoor" type="checkbox" style="width:auto"> Outdoors</label></div>
@@ -698,7 +698,7 @@
                 <option value="LOCATION_INFO">Place or address</option>
               </select>
             </div>
-            <div><label class="f" for="infoPhone">Phone (optional)</label><input id="infoPhone" type="tel" maxlength="40" placeholder="+351 21 000 0000"></div>
+            <div><label class="f" for="infoPhone">Phone (optional)</label><input id="infoPhone" type="tel" maxlength="40" placeholder="Phone number"></div>
             <div style="grid-column:1/-1"><label class="f" for="infoText">Details (optional)</label><textarea id="infoText" rows="2" maxlength="2000" placeholder="Booking reference, address, anything you'll want to find fast."></textarea></div>
           </div>
           <div class="row" style="margin-top:10px">
@@ -841,7 +841,7 @@
           </div>
           <div>
             <label class="f" for="planMust">Must do</label>
-            <input id="planMust" maxlength="500" placeholder="Belém Tower, a fado show">
+            <input id="planMust" maxlength="500" placeholder="A museum, a show, a restaurant">
           </div>
           <div>
             <label class="f" for="planAvoid">Avoid</label>
@@ -3787,8 +3787,13 @@
     var ok = r && r.ok && r.data && Array.isArray(r.data.days) && r.data.days.length;
     if (!ok) {
       if ((currentTrip() || {}).id === tripId) {
+        // 2026-09-25: generate-itinerary answers 422 PLAN_TOO_LONG (with a
+        // user-facing message) when a long trip doesn't fit in one response.
         setMsg("planErr", netFail ? NETWORK_HINT
           : (r && r.status === 401) ? VERSION_MSG.UNAUTHORIZED
+          : (r && r.status === 422 && r.data && r.data.error === "PLAN_TOO_LONG")
+            ? (typeof r.data.message === "string" && r.data.message ? r.data.message
+               : "That trip is too long to plan in one go. Try again, or plan a shorter stretch.")
           : "We couldn't build a plan right now. Nothing on your trip was changed. Try again in a minute.", true);
       }
       return;
@@ -3875,7 +3880,11 @@
     if (!rpcOk(r)) {
       btn.disabled = false;
       disarmButton(btn);
-      setMsg("planErr", versionMsg(r), true);
+      // 2026-09-25: until the DB baseline fix ships, undoing the first change
+      // on a trip returns NO_PREVIOUS_VERSION.
+      setMsg("planErr", versionCode(r) === "NO_PREVIOUS_VERSION"
+        ? "This was the first change on this trip, so there's nothing earlier to go back to. Remove the items instead."
+        : versionMsg(r), true);
       return;
     }
     var saved = planRead(tripId);
