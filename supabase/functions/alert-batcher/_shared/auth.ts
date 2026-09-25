@@ -55,10 +55,6 @@ function bearer(req) {
  *
  * NEVER accept an identity from the request body. Seven functions in this
  * codebase did, which let any caller act as any user.
- *
- * Note the deliberate rejection of a bare presence check: seven other functions
- * used `if (!authHeader) return 401`, which `Authorization: x` passes because
- * the token is never decoded.
  */ export async function requireUser(req) {
   const token = bearer(req);
   if (!token) return fail('Missing or invalid Authorization header', 401);
@@ -108,10 +104,6 @@ function bearer(req) {
 }
 /**
  * Bridges Supabase auth to the platform identity space.
- *
- * TravelOS runs two id systems: Supabase uuids (auth.uid(), trips, profiles)
- * and prefixed text ids (platform_users, platform_trips, trip_members).
- * `auth_identities.provider_subject` holds auth.uid() as text.
  *
  * Match on provider_subject ALONE. The `provider` column is
  * `app_metadata.provider || 'email_link'`, so it varies by sign-in method and

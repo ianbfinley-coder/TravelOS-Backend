@@ -1,6 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-
 // TWO FATAL DEFECTS, 2026-09-19. This function answered 404 to everyone.
 //
 // 1. THE OWNERSHIP QUERY NAMED COLUMNS THAT DO NOT EXIST.
@@ -47,12 +46,10 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 // file requests model `google/gemini-3.5-flash`. If that id is not valid on
 // the account, each call returns non-2xx and the function answers 502 — which
 // would have been indistinguishable from the 404 above until now.
-
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-
 // RATE LIMITING 2026-09-20 — this function had no limit of any kind, and it is
 // the most expensive endpoint in the project to call. One request makes up to
 // THREE OpenRouter completions: the intent classifier, the answer itself, and
@@ -82,7 +79,6 @@ const RATE_LIMIT_MAX = 20;
 const RATE_LIMIT_WINDOW_SECONDS = 300;
 // Must be one of global | strict | user_quota — see rate_limit_buckets_bucket_type_check.
 const RATE_LIMIT_BUCKET_TYPE = 'user_quota';
-
 // IP RATE LIMITING 2026-09-20 (Q2.15) — every limit above only starts
 // counting once a JWT has been verified as belonging to a real user. A flood
 // of requests carrying a syntactically-valid-looking but bogus bearer token
@@ -106,79 +102,29 @@ const IP_RATE_LIMIT_MAX = 100;
 const IP_RATE_LIMIT_WINDOW_SECONDS = 300;
 // Must be one of global | strict | user_quota — see rate_limit_buckets_bucket_type_check.
 const IP_RATE_LIMIT_BUCKET_TYPE = 'strict';
-
 // Supabase Edge Functions sit behind a gateway that sets x-forwarded-for,
 // which may be a comma-separated chain (client, then any intermediate
 // proxies) — the first entry is the client's own address. Falls back to a
 // constant so a missing header can never throw.
-function getClientIp(req: Request): string {
+function getClientIp(req) {
   const forwardedFor = req.headers.get('x-forwarded-for');
   if (!forwardedFor) return 'unknown';
   const first = forwardedFor.split(',')[0]?.trim();
   return first || 'unknown';
 }
-
-// ── Types ────────────────────────────────────────────────────────────────
-interface AlertContext {
-  alert_id: string;
-  alert_type?: string;
-  priority?: 'INFO' | 'LOW' | 'HIGH' | 'CRITICAL';
-  urgency?: string;
-  confidence?: string;
-  title?: string;
-  summary?: string;
-  explanation?: string;
-  affected_entities?: Array<{ type: string; description: string }>;
-  recommended_next_step_type?: string;
-  monitoring_event_id?: string | null;
-  primary_impact_id?: string | null;
-  impact?: Record<string, unknown> | null;
-  trip_id?: string;
-  itinerary_version_id?: string | null;
-  alert_title?: string;
-  alert_summary?: string;
-  alert_priority?: string;
-  alert_urgency?: string;
-  alert_confidence?: string;
-  affected_reservations?: any[];
-  affected_itinerary_items?: any[];
-  protected_items?: any[];
-  constraints?: any[];
-}
-
-interface ProposalSummary {
-  id: string;
-  goal: string;
-  what_will_change: string;
-  what_will_stay: string;
-  why_recommended: string;
-  trade_offs: any[];
-  expected_result: string;
-  confidence: string;
-  affected_items: any[];
-  status: string;
-}
-
 // ── Safe failure logger — never throws ───────────────────────────────────
-async function logRecovery(
-  supabaseUrl: string,
-  serviceRoleKey: string,
-  params: {
-    user_id?: string;
-    trip_id?: string;
-    operation: string;
-    related_object_type?: string;
-    related_object_id?: string;
-    failure_type: string;
-    failure_message?: string;
-    failure_detail?: Record<string, unknown>;
-  }
-): Promise<string | null> {
+async function logRecovery(supabaseUrl, serviceRoleKey, params) {
   try {
     const res = await fetch(`${supabaseUrl}/functions/v1/pipeline-recovery`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceRoleKey}` },
-      body: JSON.stringify({ action: 'log_failure', ...params }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceRoleKey}`
+      },
+      body: JSON.stringify({
+        action: 'log_failure',
+        ...params
+      })
     });
     if (res.ok) {
       const data = await res.json();
@@ -191,41 +137,65 @@ async function logRecovery(
     return null;
   }
 }
-
 // ── Proposal intent detection ──────────────────────────────────────────
 const PROPOSAL_PHRASES = [
-  'fix this', 'what are my options', 'how can i fix', 'make this work',
-  'protect my', 'change my plan', 'what should i do', 'help me fix',
-  'rebook', 'reschedule', 'adjust my itinerary', 'what can i do',
-  'how do i fix', 'what do i do', 'give me options', 'show me options',
-  'suggest a fix', 'suggest changes', 'what changes', 'help me with this',
-  'what would you recommend', 'recommend a fix', 'fix my trip',
+  'fix this',
+  'what are my options',
+  'how can i fix',
+  'make this work',
+  'protect my',
+  'change my plan',
+  'what should i do',
+  'help me fix',
+  'rebook',
+  'reschedule',
+  'adjust my itinerary',
+  'what can i do',
+  'how do i fix',
+  'what do i do',
+  'give me options',
+  'show me options',
+  'suggest a fix',
+  'suggest changes',
+  'what changes',
+  'help me with this',
+  'what would you recommend',
+  'recommend a fix',
+  'fix my trip'
 ];
-
 const APPROVAL_PHRASES = [
-  'apply this plan', 'yes make this change', 'do it', 'apply it',
-  'yes do it', 'confirm', 'go ahead', 'execute', 'apply the plan',
-  'make the change', 'yes please', "let's do it", 'lets do it',
-  'sounds good', 'looks good', 'approved', 'yes apply', 'apply changes',
-  'make it happen', 'proceed', 'yes confirm',
+  'apply this plan',
+  'yes make this change',
+  'do it',
+  'apply it',
+  'yes do it',
+  'confirm',
+  'go ahead',
+  'execute',
+  'apply the plan',
+  'make the change',
+  'yes please',
+  "let's do it",
+  'lets do it',
+  'sounds good',
+  'looks good',
+  'approved',
+  'yes apply',
+  'apply changes',
+  'make it happen',
+  'proceed',
+  'yes confirm'
 ];
-
-function isProposalRequest(message: string): boolean {
+function isProposalRequest(message) {
   const lower = message.toLowerCase();
-  return PROPOSAL_PHRASES.some(p => lower.includes(p));
+  return PROPOSAL_PHRASES.some((p)=>lower.includes(p));
 }
-
-function isApprovalMessage(message: string): boolean {
+function isApprovalMessage(message) {
   const lower = message.toLowerCase().trim();
-  return APPROVAL_PHRASES.some(p => lower.includes(p));
+  return APPROVAL_PHRASES.some((p)=>lower.includes(p));
 }
-
 // ── Alert context helpers ────────────────────────────────────────────
-function buildAlertSystemPromptSection(
-  alertCtx: AlertContext,
-  impact: Record<string, unknown> | null,
-  alertStale: boolean
-): string {
+function buildAlertSystemPromptSection(alertCtx, impact, alertStale) {
   const title = alertCtx.alert_title ?? alertCtx.title ?? 'Unknown Alert';
   const summary = alertCtx.alert_summary ?? alertCtx.summary ?? '';
   const priority = alertCtx.alert_priority ?? alertCtx.priority ?? 'UNKNOWN';
@@ -233,8 +203,7 @@ function buildAlertSystemPromptSection(
   const confidence = alertCtx.alert_confidence ?? alertCtx.confidence ?? 'UNKNOWN';
   const alertType = alertCtx.alert_type ?? 'TRAVEL_ALERT';
   const affectedEntities = alertCtx.affected_entities ?? [];
-
-  const lines: string[] = [];
+  const lines = [];
   lines.push('=== ALERT CONTEXT ===');
   lines.push('The traveler opened this conversation from a Travel Alert. Do NOT ask them to repeat this information.');
   lines.push('');
@@ -246,55 +215,48 @@ function buildAlertSystemPromptSection(
   lines.push('');
   lines.push('WHAT CHANGED (CONFIRMED FACT):');
   lines.push(summary);
-
   if (alertCtx.explanation) {
     lines.push('');
     lines.push('ADDITIONAL CONTEXT:');
     lines.push(alertCtx.explanation);
   }
-
   if (affectedEntities.length > 0) {
     lines.push('');
     lines.push('WHAT MAY BE AFFECTED:');
-    for (const entity of affectedEntities) {
+    for (const entity of affectedEntities){
       lines.push(`- ${entity.type}: ${entity.description}`);
     }
   }
-
   if (alertCtx.affected_reservations && alertCtx.affected_reservations.length > 0) {
     lines.push('');
     lines.push('AFFECTED RESERVATIONS:');
-    for (const r of alertCtx.affected_reservations) {
+    for (const r of alertCtx.affected_reservations){
       lines.push(`- ${r.type ?? 'reservation'}: ${r.title ?? r.name ?? r.id}${r.confirmation_number ? ' (Conf: ' + r.confirmation_number + ')' : ''}`);
     }
   }
-
   if (alertCtx.protected_items && alertCtx.protected_items.length > 0) {
     lines.push('');
     lines.push('PROTECTED ITEMS (must not be changed):');
-    for (const p of alertCtx.protected_items) {
+    for (const p of alertCtx.protected_items){
       lines.push(`- ${typeof p === 'string' ? p : JSON.stringify(p)}`);
     }
   }
-
   if (impact) {
     lines.push('');
     lines.push('TRIP IMPACT ANALYSIS:');
     lines.push(`- Impact Level: ${impact.impact_level ?? 'UNKNOWN'}`);
     lines.push(`- Impact Type: ${impact.impact_type ?? 'UNKNOWN'}`);
     lines.push(`- Explanation: ${impact.explanation ?? 'N/A'}`);
-    const evidence = impact.evidence as unknown[] | null;
+    const evidence = impact.evidence;
     if (evidence && evidence.length > 0) {
-      lines.push(`- Evidence: ${evidence.map((e: unknown) => (typeof e === 'string' ? e : JSON.stringify(e))).join(', ')}`);
+      lines.push(`- Evidence: ${evidence.map((e)=>typeof e === 'string' ? e : JSON.stringify(e)).join(', ')}`);
     }
     lines.push(`- Confidence: ${impact.confidence ?? 'UNKNOWN'}`);
   }
-
   if (alertStale) {
     lines.push('');
     lines.push('⚠️ NOTE: This alert may no longer be current. Acknowledge this uncertainty.');
   }
-
   lines.push('');
   lines.push('INSTRUCTIONS FOR THIS CONVERSATION:');
   lines.push('1. Begin by acknowledging the alert and explaining WHAT CHANGED, WHY IT MATTERS, and WHAT CAN WE DO?');
@@ -304,11 +266,9 @@ function buildAlertSystemPromptSection(
   lines.push('5. You may explain, analyze, and discuss options. Do NOT automatically change the itinerary.');
   lines.push('6. If the traveler asks for a solution, generate a structured proposal. Do NOT execute it.');
   lines.push('=== END ALERT CONTEXT ===');
-
   return lines.join('\n');
 }
-
-function buildAlertOpeningInstruction(alertCtx: AlertContext): string {
+function buildAlertOpeningInstruction(alertCtx) {
   const confidence = alertCtx.alert_confidence ?? alertCtx.confidence ?? 'UNKNOWN';
   return `
 This is the FIRST message in the conversation. The traveler opened the Copilot from a Travel Alert.
@@ -326,13 +286,12 @@ WHAT CAN WE DO?
 IMPORTANT: If confidence is "${confidence}" and it is LOW or UNKNOWN, use hedging language throughout ("may", "could", "we're not certain yet"). Do NOT invent facts not in the context.
 `;
 }
-
-function buildAlertSuggestions(alertCtx: AlertContext): string[] {
+function buildAlertSuggestions(alertCtx) {
   const suggestions = [
     'What does this mean for my trip?',
     'What are my options?',
     'Which reservations are affected?',
-    'How urgent is this?',
+    'How urgent is this?'
   ];
   const entities = alertCtx.affected_entities ?? [];
   if (entities.length > 0) {
@@ -342,12 +301,73 @@ function buildAlertSuggestions(alertCtx: AlertContext): string[] {
   }
   return suggestions;
 }
-
+// ── Trip-local time helpers (FIX 2026-09-23) ─────────────────────────
+// itinerary_items.start_time is timestamptz and arrives as UTC. The model
+// used to see "2026-12-06T15:00:00+00:00", read it as 3 PM, and write the
+// traveler's "2 PM" back as 14:00 UTC (9 AM in New York). Every time the
+// model sees is now converted to the trip's zone with an explicit offset, and
+// it is told to write times back the same way, so Postgres stores the right
+// instant.
+function validTz(tz) {
+  if (!tz) return null;
+  try {
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tz
+    });
+    return tz;
+  } catch  {
+    return null;
+  }
+}
+function parseTs(ts) {
+  let s = String(ts).trim().replace(' ', 'T');
+  if (/[+-]\d{2}$/.test(s)) s += ':00';
+  return new Date(s);
+}
+function toLocalIso(ts, tz) {
+  if (!ts) return ts ?? null;
+  const d = parseTs(ts);
+  if (isNaN(d.getTime())) return String(ts);
+  if (!tz) return d.toISOString().replace('.000Z', 'Z');
+  const p = {};
+  for (const part of new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'longOffset'
+  }).formatToParts(d))p[part.type] = part.value;
+  const off = (p.timeZoneName || 'GMT').replace('GMT', '') || '+00:00';
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}${off}`;
+}
+function toLocalLabel(ts, tz) {
+  if (!ts) return '';
+  const d = parseTs(ts);
+  if (isNaN(d.getTime())) return String(ts);
+  const label = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz ?? 'UTC',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(d);
+  return `${label} (${toLocalIso(ts, tz)})`;
+}
+function timeRule(tz) {
+  return tz ? `TIME ZONE: ${tz}. Every time in this context is local ${tz} time, shown with its UTC offset. Any time you write must also be local ${tz} time as ISO 8601 with the correct UTC offset for that date (for example 2026-12-06T14:00:00-05:00 for 2 PM in New York in December). Never write a local time with "Z" or "+00:00" unless the zone really is UTC.` : `TIME ZONE: unknown. Times are UTC. Write any time as ISO 8601 UTC.`;
+}
 // ── Trip context formatter ───────────────────────────────────────────
-function formatContextForPrompt(context: any): string {
+function formatContextForPrompt(context, tzIn) {
   if (!context || context.error) return 'Trip context unavailable.';
-  const lines: string[] = [];
-
+  const lines = [];
+  const tz = validTz(tzIn ?? context?.trip?.primary_tz);
+  lines.push(timeRule(tz));
+  lines.push('');
   const trip = context.trip;
   if (trip) {
     lines.push('=== TRIP OVERVIEW ===');
@@ -356,7 +376,6 @@ function formatContextForPrompt(context: any): string {
     if (trip.travelers_count != null) lines.push(`Travelers: ${trip.travelers_count}`);
     if (trip.notes) lines.push(`Notes: ${trip.notes}`);
   }
-
   const itinerary = context.itinerary;
   if (itinerary) {
     lines.push('');
@@ -365,61 +384,62 @@ function formatContextForPrompt(context: any): string {
     const days = context.days || [];
     if (days.length > 0) {
       lines.push(`Duration: ${days.length} day(s)`);
-      days.slice(0, 10).forEach((day: any) => {
+      days.slice(0, 10).forEach((day)=>{
         lines.push(`Day ${day.day_number} (${day.date || 'TBD'}): ${day.title || ''}`);
         const items = day.items || [];
-        items.slice(0, 5).forEach((item: any) => {
-          lines.push(`  - [${item.category || 'activity'}] ${item.title}${item.start_time ? ' at ' + item.start_time : ''}${item.location ? ' @ ' + item.location : ''}${item.cost ? ' ($' + item.cost + ')' : ''}`);
+        items.slice(0, 5).forEach((item)=>{
+          lines.push(`  - [${item.category || 'activity'}] ${item.title}${item.start_time ? ' at ' + toLocalLabel(item.start_time, tz) : ''}${item.location ? ' @ ' + item.location : ''}${item.cost ? ' ($' + item.cost + ')' : ''}`);
         });
       });
     }
   }
-
   const reservations = context.reservations || [];
   if (reservations.length > 0) {
     lines.push('');
     lines.push('=== RESERVATIONS ===');
-    reservations.slice(0, 10).forEach((r: any) => {
+    reservations.slice(0, 10).forEach((r)=>{
       lines.push(`- ${r.type || 'reservation'}: ${r.title || r.name}${r.confirmation_number ? ' (Conf: ' + r.confirmation_number + ')' : ''}${r.date ? ' on ' + r.date : ''}${r.status ? ' [' + r.status + ']' : ''}`);
     });
   }
-
   const health = context.health;
   if (health) {
     lines.push('');
     lines.push('=== TRIP HEALTH ===');
     lines.push(`Score: ${health.score ?? 'N/A'}/100 — Status: ${health.status || 'unknown'}`);
   }
-
   const budget = context.budget;
   if (budget) {
     lines.push('');
     lines.push('=== BUDGET ===');
     lines.push(`Total: $${budget.total_budget ?? 'N/A'} | Spent: $${budget.total_spent ?? 0} | Remaining: $${budget.remaining ?? 'N/A'}`);
   }
-
   if (context.partial) {
     lines.push('');
     lines.push('NOTE: Only the basic trip record could be loaded. The itinerary, health, friction and budget detail are NOT available for this conversation — say so if the traveler asks about them, and do not estimate.');
   }
-
   return lines.join('\n');
 }
-
 // ── Helpers ───────────────────────────────────────────────────────────
 const CANCEL_PHRASES = [
-  'cancel', 'never mind', 'nevermind', 'forget it', 'keep it as is',
-  'keep it as-is', 'leave it', "don't change", 'no change', 'ignore that',
-  'disregard', 'scratch that',
+  'cancel',
+  'never mind',
+  'nevermind',
+  'forget it',
+  'keep it as is',
+  'keep it as-is',
+  'leave it',
+  "don't change",
+  'no change',
+  'ignore that',
+  'disregard',
+  'scratch that'
 ];
-
-function isCancellation(message: string): boolean {
+function isCancellation(message) {
   const lower = message.toLowerCase().trim();
-  return CANCEL_PHRASES.some(phrase => lower.includes(phrase));
+  return CANCEL_PHRASES.some((phrase)=>lower.includes(phrase));
 }
-
-function extractProposalIdFromHistory(conversationHistory: any[]): string | null {
-  for (let i = conversationHistory.length - 1; i >= 0; i--) {
+function extractProposalIdFromHistory(conversationHistory) {
+  for(let i = conversationHistory.length - 1; i >= 0; i--){
     const msg = conversationHistory[i];
     if (msg?.role === 'assistant' && msg?.proposal_id) return msg.proposal_id;
     if (msg?.role === 'assistant' && typeof msg?.content === 'string') {
@@ -429,7 +449,6 @@ function extractProposalIdFromHistory(conversationHistory: any[]): string | null
   }
   return null;
 }
-
 // FIX 2026-09-21: this selected a nonexistent `source` column and filtered
 // on `status = 'ACTIVE'`. itinerary_versions.status is a free-text field
 // whose real values are lowercase ('ready', 'ready_with_notes',
@@ -440,35 +459,18 @@ function extractProposalIdFromHistory(conversationHistory: any[]): string | null
 // missing column), so every staleness check and baseVersionId resolution
 // that depended on it silently saw "no active version" — always false, never
 // actually stale, and every proposal's base version resolved to null.
-async function getActiveItineraryVersion(supabase: any, tripId: string): Promise<any | null> {
-  const { data, error } = await supabase
-    .from('itinerary_versions')
-    .select('id, version_number, status, is_active')
-    .eq('trip_id', tripId)
-    .eq('is_active', true)
-    .maybeSingle();
+async function getActiveItineraryVersion(supabase, tripId) {
+  const { data, error } = await supabase.from('itinerary_versions').select('id, version_number, status, is_active').eq('trip_id', tripId).eq('is_active', true).maybeSingle();
   if (error) console.error('[copilot-chat] itinerary_versions read failed:', error.message);
   return data ?? null;
 }
-
 // ── Proposal generation ───────────────────────────────────────────────
-async function generateProposal(
-  supabase: any,
-  openrouterKey: string,
-  userId: string,
-  tripId: string,
-  message: string,
-  alertCtx: AlertContext,
-  alertImpact: Record<string, unknown> | null,
-  contextFormatted: string,
-  itineraryVersionId: string | null
-): Promise<{ proposal: ProposalSummary | null; aiMessage: string; proposalId: string | null }> {
+async function generateProposal(supabase, openrouterKey, userId, tripId, message, alertCtx, alertImpact, contextFormatted, itineraryVersionId) {
   const title = alertCtx.alert_title ?? alertCtx.title ?? 'Travel Alert';
   const summary = alertCtx.alert_summary ?? alertCtx.summary ?? '';
   const priority = alertCtx.alert_priority ?? alertCtx.priority ?? 'UNKNOWN';
   const affectedReservations = alertCtx.affected_reservations ?? [];
   const protectedItems = alertCtx.protected_items ?? alertCtx.constraints ?? [];
-
   const proposalSystemPrompt = `You are TravelOS, an expert AI travel planner generating a structured change proposal.
 
 ALERT CONTEXT:
@@ -509,14 +511,13 @@ Generate a structured proposal. Respond ONLY with valid JSON (no markdown, no co
   ],
   "ai_message": "The full conversational message to show the traveler, structured as:\n\nWHAT WILL CHANGE\n[summary]\n\nWHAT WILL STAY THE SAME\n[summary]\n\nWHY THIS FIX IS RECOMMENDED\n[rationale]\n\nTRADE-OFFS\n[pros and cons]\n\nEXPECTED RESULT\n[outcome]"
 }`;
-
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${openrouterKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://travelos.app',
-      'X-Title': 'TravelOS Copilot',
+      'X-Title': 'TravelOS Copilot'
     },
     body: JSON.stringify({
       model: 'google/gemini-3.5-flash',
@@ -526,22 +527,30 @@ Generate a structured proposal. Respond ONLY with valid JSON (no markdown, no co
       // write-up) plus everything else. A truncated/malformed reply threw in
       // JSON.parse and the raw model text was handed back as `aiMessage`,
       // which is what the traveler sees.
-      response_format: { type: 'json_object' },
-      messages: [{ role: 'user', content: proposalSystemPrompt }],
+      response_format: {
+        type: 'json_object'
+      },
+      messages: [
+        {
+          role: 'user',
+          content: proposalSystemPrompt
+        }
+      ],
       max_tokens: 3000,
-      temperature: 0.3,
-    }),
+      temperature: 0.3
+    })
   });
-
   if (!res.ok) {
     console.error('[copilot-chat] proposal generation failed:', res.status, (await res.text()).slice(0, 300));
-    return { proposal: null, aiMessage: "I couldn't generate a proposal right now. Please try again.", proposalId: null };
+    return {
+      proposal: null,
+      aiMessage: "I couldn't generate a proposal right now. Please try again.",
+      proposalId: null
+    };
   }
-
   const data = await res.json();
   const rawContent = data.choices?.[0]?.message?.content ?? '{}';
-
-  let parsed: any = {};
+  let parsed = {};
   try {
     const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
     parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
@@ -549,13 +558,15 @@ Generate a structured proposal. Respond ONLY with valid JSON (no markdown, no co
     // FIX 2026-09-22: was `aiMessage: rawContent` — surfaced the raw,
     // possibly truncated JSON text to the traveler. Never do that.
     console.error('[copilot-chat] failed to parse proposal JSON:', e instanceof Error ? e.message : String(e), '| raw (first 500 chars):', rawContent.slice(0, 500));
-    return { proposal: null, aiMessage: "I wasn't able to put together a clean proposal for that just now — please try again.", proposalId: null };
+    return {
+      proposal: null,
+      aiMessage: "I wasn't able to put together a clean proposal for that just now — please try again.",
+      proposalId: null
+    };
   }
-
   const activeVersion = await getActiveItineraryVersion(supabase, tripId);
   const baseVersionId = itineraryVersionId ?? activeVersion?.id ?? null;
-
-  let proposalId: string | null = null;
+  let proposalId = null;
   // FIX 2026-09-22: this insert named five columns that do not exist on
   // copilot_proposals — goal, protected_items, trade_offs, expected_result,
   // impact_id (singular; the real column is impact_ids, an array). Every
@@ -566,44 +577,43 @@ Generate a structured proposal. Respond ONLY with valid JSON (no markdown, no co
   // Real columns: interpreted_goal, preserved_constraints, expected_effects
   // (jsonb — trade_offs has no column at all, so it isn't persisted here),
   // impact_ids (array).
-  const { data: saved, error: saveErr } = await supabase
-    .from('copilot_proposals')
-    .insert({
-      user_id: userId,
-      trip_id: tripId,
-      alert_id: alertCtx.alert_id ?? null,
-      monitoring_event_id: alertCtx.monitoring_event_id ?? null,
-      impact_ids: alertCtx.primary_impact_id ? [alertCtx.primary_impact_id] : [],
-      itinerary_version_id: baseVersionId,
-      base_itinerary_version_id: baseVersionId,
-      user_request: message,
-      interpreted_goal: parsed.goal ?? message,
-      proposed_changes: parsed.proposed_changes ?? [],
-      preserved_constraints: parsed.protected_items ?? protectedItems,
-      expected_effects: { summary: parsed.expected_result ?? '', trade_offs: parsed.trade_offs ?? [] },
-      confidence: parsed.confidence ?? 'MEDIUM',
-      what_will_change: parsed.what_will_change ?? '',
-      what_will_stay: parsed.what_will_stay ?? '',
-      why_recommended: parsed.why_recommended ?? '',
-      affected_items: parsed.affected_items ?? [],
-      // FIX 2026-09-22: 'PENDING' is not a value copilot_proposals.status
-      // allows (see the CHECK constraint note in executeProposal below) —
-      // this insert has always been rejected outright. 'READY_FOR_REVIEW' is
-      // both a real allowed value and matches the state this proposal is
-      // actually in right after being generated.
-      status: 'READY_FOR_REVIEW',
-      stale_checked_at: new Date().toISOString(),
-    })
-    .select('id')
-    .single();
-
+  const { data: saved, error: saveErr } = await supabase.from('copilot_proposals').insert({
+    user_id: userId,
+    trip_id: tripId,
+    alert_id: alertCtx.alert_id ?? null,
+    monitoring_event_id: alertCtx.monitoring_event_id ?? null,
+    impact_ids: alertCtx.primary_impact_id ? [
+      alertCtx.primary_impact_id
+    ] : [],
+    itinerary_version_id: baseVersionId,
+    base_itinerary_version_id: baseVersionId,
+    user_request: message,
+    interpreted_goal: parsed.goal ?? message,
+    proposed_changes: parsed.proposed_changes ?? [],
+    preserved_constraints: parsed.protected_items ?? protectedItems,
+    expected_effects: {
+      summary: parsed.expected_result ?? '',
+      trade_offs: parsed.trade_offs ?? []
+    },
+    confidence: parsed.confidence ?? 'MEDIUM',
+    what_will_change: parsed.what_will_change ?? '',
+    what_will_stay: parsed.what_will_stay ?? '',
+    why_recommended: parsed.why_recommended ?? '',
+    affected_items: parsed.affected_items ?? [],
+    // FIX 2026-09-22: 'PENDING' is not a value copilot_proposals.status
+    // allows (see the CHECK constraint note in executeProposal below) —
+    // this insert has always been rejected outright. 'READY_FOR_REVIEW' is
+    // both a real allowed value and matches the state this proposal is
+    // actually in right after being generated.
+    status: 'READY_FOR_REVIEW',
+    stale_checked_at: new Date().toISOString()
+  }).select('id').single();
   if (!saveErr && saved) {
     proposalId = saved.id;
   } else {
     console.error('[copilot-chat] failed to save proposal:', saveErr?.message);
   }
-
-  const proposalSummary: ProposalSummary = {
+  const proposalSummary = {
     id: proposalId ?? '',
     goal: parsed.goal ?? '',
     what_will_change: parsed.what_will_change ?? '',
@@ -613,9 +623,8 @@ Generate a structured proposal. Respond ONLY with valid JSON (no markdown, no co
     expected_result: parsed.expected_result ?? '',
     confidence: parsed.confidence ?? 'MEDIUM',
     affected_items: parsed.affected_items ?? [],
-    status: 'PENDING',
+    status: 'PENDING'
   };
-
   return {
     proposal: proposalSummary,
     // FIX 2026-09-22: was `parsed.ai_message ?? rawContent` — the same
@@ -623,37 +632,20 @@ Generate a structured proposal. Respond ONLY with valid JSON (no markdown, no co
     // omits ai_message (valid JSON, missing field, e.g. from a schema slip),
     // this used to hand back the whole raw JSON blob as the chat message.
     aiMessage: parsed.ai_message ?? "Here's the proposal I put together — see the details below.",
-    proposalId,
+    proposalId
   };
 }
-
 // ── Proposal approval / execution ───────────────────────────────────────
-async function executeProposal(
-  supabase: any,
-  supabaseUrl: string,
-  serviceRoleKey: string,
-  proposalId: string,
-  userId: string,
-  tripId: string
-): Promise<{
-  executed: boolean;
-  stale?: boolean;
-  failed?: boolean;
-  new_version_id?: string;
-  message: string;
-}> {
-  const { data: proposal, error: fetchErr } = await supabase
-    .from('copilot_proposals')
-    .select('*')
-    .eq('id', proposalId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
+async function executeProposal(supabase, supabaseUrl, serviceRoleKey, proposalId, userId, tripId) {
+  const { data: proposal, error: fetchErr } = await supabase.from('copilot_proposals').select('*').eq('id', proposalId).eq('user_id', userId).maybeSingle();
   if (fetchErr) console.error('[copilot-chat] copilot_proposals read failed:', fetchErr.message);
   if (fetchErr || !proposal) {
-    return { executed: false, failed: true, message: 'Proposal not found.' };
+    return {
+      executed: false,
+      failed: true,
+      message: 'Proposal not found.'
+    };
   }
-
   // FIX 2026-09-22: was `proposal.status !== 'PENDING'` — 'PENDING' is not
   // one of the values copilot_proposals.status actually allows (confirmed
   // against its CHECK constraint: DRAFT, READY_FOR_REVIEW, APPROVED,
@@ -663,7 +655,7 @@ async function executeProposal(
   // proposalId was always null and this function could never find a
   // proposal to execute in the first place.
   if (proposal.status !== 'READY_FOR_REVIEW') {
-    const statusMsg: Record<string, string> = {
+    const statusMsg = {
       DRAFT: 'This proposal still needs clarification before it can be applied.',
       STALE: 'This proposal is stale — the itinerary has changed. Please request a new proposal.',
       APPROVED: 'This proposal has already been approved.',
@@ -671,84 +663,69 @@ async function executeProposal(
       EXECUTED: 'This proposal has already been applied.',
       COMPLETE: 'This proposal has already been applied.',
       FAILED: 'This proposal previously failed. Please request a new proposal.',
-      CANCELLED: 'This proposal was cancelled. Please request a new proposal.',
+      CANCELLED: 'This proposal was cancelled. Please request a new proposal.'
     };
     return {
       executed: false,
       failed: true,
-      message: statusMsg[proposal.status] ?? `Proposal is in ${proposal.status} state and cannot be executed.`,
+      message: statusMsg[proposal.status] ?? `Proposal is in ${proposal.status} state and cannot be executed.`
     };
   }
-
   const activeVersion = await getActiveItineraryVersion(supabase, tripId);
   const currentActiveVersionId = activeVersion?.id ?? null;
   const baseVersionId = proposal.base_itinerary_version_id ?? proposal.itinerary_version_id ?? null;
-
   if (baseVersionId && currentActiveVersionId && currentActiveVersionId !== baseVersionId) {
-    await supabase
-      .from('copilot_proposals')
-      .update({ status: 'STALE', updated_at: new Date().toISOString() })
-      .eq('id', proposalId);
-
+    await supabase.from('copilot_proposals').update({
+      status: 'STALE',
+      updated_at: new Date().toISOString()
+    }).eq('id', proposalId);
     return {
       executed: false,
       stale: true,
-      message: 'The itinerary has changed since this proposal was created. Let me refresh the context.',
+      message: 'The itinerary has changed since this proposal was created. Let me refresh the context.'
     };
   }
-
   // FIX 2026-09-22: proposal.protected_items / proposal.goal read columns
   // that don't exist on copilot_proposals (see the insert-side fix above) —
   // real columns are preserved_constraints / interpreted_goal.
   const protectedItems = proposal.preserved_constraints ?? [];
   if (Array.isArray(protectedItems) && protectedItems.length > 0) {
-    const reservationIds = protectedItems
-      .filter((p: any) => typeof p === 'object' && p.type === 'reservation' && p.id)
-      .map((p: any) => p.id);
-
+    const reservationIds = protectedItems.filter((p)=>typeof p === 'object' && p.type === 'reservation' && p.id).map((p)=>p.id);
     if (reservationIds.length > 0) {
-      const { data: existingReservations, error: resErr } = await supabase
-        .from('reservations')
-        .select('id, reservation_status')
-        .in('id', reservationIds);
-
+      const { data: existingReservations, error: resErr } = await supabase.from('reservations').select('id, reservation_status').in('id', reservationIds);
       if (resErr) {
         console.error('[copilot-chat] protected reservation check failed:', resErr.message);
         return {
           executed: false,
           failed: true,
-          message: 'Your protected reservations could not be verified, so nothing was changed.',
+          message: 'Your protected reservations could not be verified, so nothing was changed.'
         };
       }
-
-      const existingIds = new Set((existingReservations ?? []).map((r: any) => r.id));
-      const missing = reservationIds.filter((id: string) => !existingIds.has(id));
+      const existingIds = new Set((existingReservations ?? []).map((r)=>r.id));
+      const missing = reservationIds.filter((id)=>!existingIds.has(id));
       if (missing.length > 0) {
         return {
           executed: false,
           failed: true,
-          message: `Some protected reservations no longer exist (${missing.length} missing). Please request a new proposal.`,
+          message: `Some protected reservations no longer exist (${missing.length} missing). Please request a new proposal.`
         };
       }
     }
   }
-
-  await supabase
-    .from('copilot_proposals')
-    .update({ status: 'EXECUTING', updated_at: new Date().toISOString() })
-    .eq('id', proposalId);
-
+  await supabase.from('copilot_proposals').update({
+    status: 'EXECUTING',
+    updated_at: new Date().toISOString()
+  }).eq('id', proposalId);
   const changeRequest = `${proposal.interpreted_goal} ${JSON.stringify(proposal.proposed_changes)}`;
-  let changePlanResult: any = null;
-  let changePlanError: string | null = null;
-  let changePlanStatus: number | null = null;
-
+  let changePlanResult = null;
+  let changePlanError = null;
+  let changePlanStatus = null;
   try {
     const changePlanRes = await fetch(`${supabaseUrl}/functions/v1/change-plan`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${serviceRoleKey}`,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
       // FIX 2026-09-21: change-plan requires `user_request` (not
       // `change_request`) and — as of the itinerary_items MVP rewrite — no
@@ -764,12 +741,10 @@ async function executeProposal(
         itinerary_version_id: baseVersionId,
         constraints: proposal.preserved_constraints ?? [],
         alert_id: proposal.alert_id ?? null,
-        proposal_id: proposalId,
-      }),
+        proposal_id: proposalId
+      })
     });
-
     changePlanStatus = changePlanRes.status;
-
     if (changePlanRes.ok) {
       changePlanResult = await changePlanRes.json();
     } else {
@@ -777,36 +752,28 @@ async function executeProposal(
       changePlanError = errText;
       console.error('[copilot-chat] change-plan error:', changePlanStatus, errText.slice(0, 300));
     }
-  } catch (e: any) {
+  } catch (e) {
     changePlanError = e?.message ?? 'Unknown error';
     console.error('[copilot-chat] change-plan exception:', e);
   }
-
   if (changePlanStatus === 409) {
-    await supabase
-      .from('copilot_proposals')
-      .update({ status: 'STALE', updated_at: new Date().toISOString() })
-      .eq('id', proposalId);
-
+    await supabase.from('copilot_proposals').update({
+      status: 'STALE',
+      updated_at: new Date().toISOString()
+    }).eq('id', proposalId);
     return {
       executed: false,
       stale: true,
-      message: 'The itinerary has changed since this proposal was created. Let me refresh the context.',
+      message: 'The itinerary has changed since this proposal was created. Let me refresh the context.'
     };
   }
-
   if (changePlanError || !changePlanResult || changePlanResult.error) {
     const reason = changePlanError ?? changePlanResult?.error ?? 'Unknown failure';
-
-    await supabase
-      .from('copilot_proposals')
-      .update({
-        status: 'FAILED',
-        failure_reason: reason,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', proposalId);
-
+    await supabase.from('copilot_proposals').update({
+      status: 'FAILED',
+      failure_reason: reason,
+      updated_at: new Date().toISOString()
+    }).eq('id', proposalId);
     await logRecovery(supabaseUrl, serviceRoleKey, {
       user_id: userId,
       trip_id: tripId,
@@ -815,49 +782,40 @@ async function executeProposal(
       related_object_id: proposalId,
       failure_type: 'PROCESSING_FAILED',
       failure_message: 'The change could not be applied',
-      failure_detail: { error: reason, proposal_id: proposalId },
+      failure_detail: {
+        error: reason,
+        proposal_id: proposalId
+      }
     });
-
     return {
       executed: false,
       failed: true,
-      message: 'The change could not be applied. Your original itinerary is unchanged.',
+      message: 'The change could not be applied. Your original itinerary is unchanged.'
     };
   }
-
   const newVersionId = changePlanResult.itinerary_version_id ?? changePlanResult.new_version_id ?? null;
-
-  await supabase
-    .from('copilot_proposals')
-    .update({
-      status: 'COMPLETE',
-      result_itinerary_version_id: newVersionId,
-      executed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', proposalId);
-
+  await supabase.from('copilot_proposals').update({
+    status: 'COMPLETE',
+    result_itinerary_version_id: newVersionId,
+    executed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }).eq('id', proposalId);
   if (newVersionId) {
-    await supabase
-      .from('itinerary_versions')
-      .update({ proposal_id: proposalId })
-      .eq('id', newVersionId);
+    await supabase.from('itinerary_versions').update({
+      proposal_id: proposalId
+    }).eq('id', newVersionId);
   }
-
   if (proposal.alert_id) {
-    await supabase
-      .from('travel_alerts')
-      .update({ copilot_proposal_id: proposalId })
-      .eq('id', proposal.alert_id);
+    await supabase.from('travel_alerts').update({
+      copilot_proposal_id: proposalId
+    }).eq('id', proposal.alert_id);
   }
-
   return {
     executed: true,
     new_version_id: newVersionId,
-    message: `Your itinerary has been updated successfully. ${changePlanResult.message ?? ''}`.trim(),
+    message: `Your itinerary has been updated successfully. ${changePlanResult.message ?? ''}`.trim()
   };
 }
-
 // ── Rate limit ────────────────────────────────────────────────────────
 // Records one request against the caller's bucket and reports whether it is
 // within the limit. See the RATE LIMITING note at the top for the numbers and
@@ -867,133 +825,135 @@ async function executeProposal(
 // actually used, never a constant: a hardcoded value drifts out of step with
 // the window the moment either is changed, and then tells the caller to come
 // back at a time that is simply wrong.
-async function checkRateLimit(
-  supabase: ReturnType<typeof createClient>,
-  bucketKey: string,
-): Promise<{ allowed: boolean; retryAfter: number }> {
+async function checkRateLimit(supabase, bucketKey) {
   const { data, error } = await supabase.rpc('rate_limit_hit', {
     p_bucket_key: bucketKey,
     p_bucket_type: RATE_LIMIT_BUCKET_TYPE,
     p_limit: RATE_LIMIT_MAX,
-    p_window_seconds: RATE_LIMIT_WINDOW_SECONDS,
+    p_window_seconds: RATE_LIMIT_WINDOW_SECONDS
   });
-
   if (error) {
     console.error('[copilot-chat] RATE LIMIT NOT ENFORCED — rate_limit_hit failed:', error.message);
-    return { allowed: true, retryAfter: 0 };
+    return {
+      allowed: true,
+      retryAfter: 0
+    };
   }
-
-  const row = (Array.isArray(data) ? data[0] : data) as
-    { is_allowed?: boolean; hits?: number; retry_after_seconds?: number } | null | undefined;
-
+  const row = Array.isArray(data) ? data[0] : data;
   if (!row || typeof row.is_allowed !== 'boolean') {
     console.error('[copilot-chat] RATE LIMIT NOT ENFORCED — rate_limit_hit returned no usable row');
-    return { allowed: true, retryAfter: 0 };
+    return {
+      allowed: true,
+      retryAfter: 0
+    };
   }
-
   if (!row.is_allowed) {
     console.warn(`[copilot-chat] rate limited ${bucketKey} at ${row.hits} hits (limit ${RATE_LIMIT_MAX})`);
   }
-
   return {
     allowed: row.is_allowed,
-    retryAfter: typeof row.retry_after_seconds === 'number'
-      ? row.retry_after_seconds
-      : RATE_LIMIT_WINDOW_SECONDS,
+    retryAfter: typeof row.retry_after_seconds === 'number' ? row.retry_after_seconds : RATE_LIMIT_WINDOW_SECONDS
   };
 }
-
 // ── IP rate limit (Q2.15) ────────────────────────────────────────────
 // Same shape and same fail-open-loudly behavior as checkRateLimit above, but
 // against the IP bucket and with a log prefix that distinguishes it from a
 // per-user block in the logs.
-async function checkIpRateLimit(
-  supabase: ReturnType<typeof createClient>,
-  bucketKey: string,
-): Promise<{ allowed: boolean; retryAfter: number }> {
+async function checkIpRateLimit(supabase, bucketKey) {
   const { data, error } = await supabase.rpc('rate_limit_hit', {
     p_bucket_key: bucketKey,
     p_bucket_type: IP_RATE_LIMIT_BUCKET_TYPE,
     p_limit: IP_RATE_LIMIT_MAX,
-    p_window_seconds: IP_RATE_LIMIT_WINDOW_SECONDS,
+    p_window_seconds: IP_RATE_LIMIT_WINDOW_SECONDS
   });
-
   if (error) {
     console.error('[copilot-chat] RATE LIMIT NOT ENFORCED (ip) — rate_limit_hit failed:', error.message);
-    return { allowed: true, retryAfter: 0 };
+    return {
+      allowed: true,
+      retryAfter: 0
+    };
   }
-
-  const row = (Array.isArray(data) ? data[0] : data) as
-    { is_allowed?: boolean; hits?: number; retry_after_seconds?: number } | null | undefined;
-
+  const row = Array.isArray(data) ? data[0] : data;
   if (!row || typeof row.is_allowed !== 'boolean') {
     console.error('[copilot-chat] RATE LIMIT NOT ENFORCED (ip) — rate_limit_hit returned no usable row');
-    return { allowed: true, retryAfter: 0 };
+    return {
+      allowed: true,
+      retryAfter: 0
+    };
   }
-
   if (!row.is_allowed) {
     console.warn(`[copilot-chat] IP rate limited ${bucketKey} at ${row.hits} hits (limit ${IP_RATE_LIMIT_MAX})`);
   }
-
   return {
     allowed: row.is_allowed,
-    retryAfter: typeof row.retry_after_seconds === 'number'
-      ? row.retry_after_seconds
-      : IP_RATE_LIMIT_WINDOW_SECONDS,
+    retryAfter: typeof row.retry_after_seconds === 'number' ? row.retry_after_seconds : IP_RATE_LIMIT_WINDOW_SECONDS
   };
 }
-
 // ── Main handler ──────────────────────────────────────────────────────
-Deno.serve(async (req: Request) => {
+Deno.serve(async (req)=>{
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
-  }
-
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    return new Response('ok', {
+      headers: corsHeaders
     });
   }
-
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({
+      error: 'Method not allowed'
+    }), {
+      status: 405,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
+  }
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const openrouterKey = Deno.env.get('OPENROUTER_API_KEY')!;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const openrouterKey = Deno.env.get('OPENROUTER_API_KEY');
     const supabase = createClient(supabaseUrl, serviceRoleKey);
-
     // IP RATE LIMIT GATE (Q2.15) — runs before any bearer token is even
     // looked at, let alone verified. See the IP RATE LIMITING note above.
     const clientIp = getClientIp(req);
     const ipRate = await checkIpRateLimit(supabase, `copilot-chat:ip:${clientIp}`);
     if (!ipRate.allowed) {
-      return new Response(JSON.stringify({ error: 'Too many requests' }), {
+      return new Response(JSON.stringify({
+        error: 'Too many requests'
+      }), {
         status: 429,
         headers: {
           ...corsHeaders,
           'Content-Type': 'application/json',
-          'Retry-After': String(Math.max(1, ipRate.retryAfter)),
-        },
+          'Retry-After': String(Math.max(1, ipRate.retryAfter))
+        }
       });
     }
-
     // Auth
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      return new Response(JSON.stringify({
+        error: 'Unauthorized'
+      }), {
         status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
       });
     }
     const jwt = authHeader.replace('Bearer ', '');
     const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
     if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      return new Response(JSON.stringify({
+        error: 'Unauthorized'
+      }), {
         status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
       });
     }
-
     // Gated here, before the body is even read: everything past this point
     // costs either a database round trip or an OpenRouter call.
     //
@@ -1004,104 +964,157 @@ Deno.serve(async (req: Request) => {
     // clear of every other function's buckets in the shared table.
     const { allowed, retryAfter } = await checkRateLimit(supabase, `copilot-chat:user:${user.id}`);
     if (!allowed) {
-      return new Response(JSON.stringify({ error: 'Too many requests' }), {
+      return new Response(JSON.stringify({
+        error: 'Too many requests'
+      }), {
         status: 429,
         headers: {
           ...corsHeaders,
           'Content-Type': 'application/json',
-          'Retry-After': String(Math.max(1, retryAfter)),
-        },
+          'Retry-After': String(Math.max(1, retryAfter))
+        }
       });
     }
-
-    let body: Record<string, unknown>;
-    try { body = await req.json(); } catch {
-      return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
+    let body;
+    try {
+      body = await req.json();
+    } catch  {
+      return new Response(JSON.stringify({
+        error: 'Invalid JSON'
+      }), {
         status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
       });
     }
-
-    const {
-      trip_id,
-      itinerary_id,
-      message,
-      conversation_history = [],
-      active_proposal_id,
-      alert_context,
-    }: {
-      trip_id: string;
-      itinerary_id?: string;
-      message: string;
-      conversation_history?: any[];
-      active_proposal_id?: string;
-      alert_context?: AlertContext;
-    } = body as any;
-
+    const { trip_id, itinerary_id, message, conversation_history = [], active_proposal_id, alert_context } = body;
     if (!trip_id || !message) {
-      return new Response(JSON.stringify({ error: 'trip_id and message are required' }), {
+      return new Response(JSON.stringify({
+        error: 'trip_id and message are required'
+      }), {
         status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
       });
     }
-
     // Verify trip ownership.
     // Only columns `trips` actually has. The old list included
     // `travelers_count` and `notes`, which do not exist — PostgREST rejected
     // the whole query with 42703 and every caller got "Trip not found".
-    const { data: trip, error: tripError } = await supabase
-      .from('trips')
-      .select('id, user_id, name, title, destination, start_date, end_date, primary_tz, status')
-      .eq('id', trip_id)
-      .maybeSingle();
-
+    const { data: trip, error: tripError } = await supabase.from('trips').select('id, user_id, name, title, destination, start_date, end_date, primary_tz, status').eq('id', trip_id).maybeSingle();
     // A failed query and an absent trip are different problems and must not
     // share a response. The first is ours; the second is the caller's.
     if (tripError) {
       console.error('[copilot-chat] trips read failed:', tripError.message);
-      return new Response(JSON.stringify({ error: 'Trip lookup failed' }), {
+      return new Response(JSON.stringify({
+        error: 'Trip lookup failed'
+      }), {
         status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
       });
     }
-
-    // Not-found and not-yours share a 404 so a caller cannot probe trip ids.
-    if (!trip || trip.user_id !== user.id) {
-      return new Response(JSON.stringify({ error: 'Trip not found' }), {
+    if (!trip) {
+      return new Response(JSON.stringify({
+        error: 'Trip not found'
+      }), {
         status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
       });
     }
-
+    // MEMBERSHIP 2026-09-25 - replaces `trip.user_id !== user.id`.
+    //
+    // That test was owner-only, so every organizer, member and viewer on a trip
+    // they did not create got "Trip not found" from the copilot - while the same
+    // person could edit the itinerary through the itinerary_* RPCs and through
+    // change-plan, both of which authorize on trip_members. This was the last
+    // function still on the owner-only axis.
+    //
+    // Identity note: `user.id` is the auth uuid; `trip_members.user_id` holds the
+    // platform `usr_...` TEXT id. Different axes - comparing them raises 22P02.
+    // Bridge through auth_identities.provider_subject, matched ALONE: the
+    // `provider` column is `app_metadata.provider || 'email_link'`, so filtering
+    // on a fixed value matches nothing and silently denies everyone.
+    //
+    // Resolves identically to change-plan's gate and private.trip_edit_role(),
+    // deliberately: three different answers to "who may act on this trip" is how
+    // this defect happened.
+    const { data: identityRow, error: identityErr } = await supabase.from('auth_identities').select('user_id').eq('provider_subject', user.id).maybeSingle();
+    if (identityErr) {
+      console.error('[copilot-chat] auth_identities read failed:', identityErr.message);
+      return new Response(JSON.stringify({
+        error: 'Authorization lookup failed'
+      }), {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
+    }
+    const platformUserId = identityRow?.user_id ?? null;
+    const { data: memberRow, error: memberErr } = platformUserId ? await supabase.from('trip_members').select('id, role').eq('trip_id', trip_id).eq('user_id', platformUserId).eq('kind', 'account').is('removed_at', null).limit(1).maybeSingle() : {
+      data: null,
+      error: null
+    };
+    if (memberErr) {
+      console.error('[copilot-chat] trip_members read failed:', memberErr.message);
+      return new Response(JSON.stringify({
+        error: 'Authorization lookup failed'
+      }), {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
+    }
+    // Non-member and non-existent share a 404 so trip ids cannot be probed.
+    if (!memberRow) {
+      return new Response(JSON.stringify({
+        error: 'Trip not found'
+      }), {
+        status: 404,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
+    }
+    const memberRole = memberRow.role;
+    // Viewers may ASK but not APPROVE. change-plan 403s a viewer outright, which
+    // is right for a write endpoint and wrong here: refusing to answer a question
+    // is not a security boundary.
+    const canApplyChanges = [
+      'owner',
+      'organizer',
+      'member'
+    ].includes(memberRole);
     // ── Alert context enrichment ─────────────────────────────────────────
-    let enrichedAlertCtx: AlertContext | null = null;
-    let alertImpact: Record<string, unknown> | null = null;
+    let enrichedAlertCtx = null;
+    let alertImpact = null;
     let alertStale = false;
-
     if (alert_context?.alert_id) {
-      const { data: alertRow, error: alertErr } = await supabase
-        .from('travel_alerts')
-        .select('*')
-        .eq('id', alert_context.alert_id)
-        .eq('trip_id', trip_id)
-        .maybeSingle();
-
+      const { data: alertRow, error: alertErr } = await supabase.from('travel_alerts').select('*').eq('id', alert_context.alert_id).eq('trip_id', trip_id).maybeSingle();
       if (alertErr) console.error('[copilot-chat] travel_alerts read failed:', alertErr.message);
       if (!alertRow || alertRow.status !== 'ACTIVE') {
         alertStale = true;
       }
-
       const primaryImpactId = alert_context.primary_impact_id ?? alertRow?.primary_impact_id ?? null;
       if (primaryImpactId) {
-        const { data: impactRow, error: impactErr } = await supabase
-          .from('trip_impacts')
-          .select('*')
-          .eq('id', primaryImpactId)
-          .maybeSingle();
+        const { data: impactRow, error: impactErr } = await supabase.from('trip_impacts').select('*').eq('id', primaryImpactId).maybeSingle();
         if (impactErr) console.error('[copilot-chat] trip_impacts read failed:', impactErr.message);
-        if (impactRow) alertImpact = impactRow as Record<string, unknown>;
+        if (impactRow) alertImpact = impactRow;
       }
-
       enrichedAlertCtx = {
         ...alert_context,
         impact: alertImpact,
@@ -1112,132 +1125,144 @@ Deno.serve(async (req: Request) => {
         alert_confidence: alert_context.alert_confidence ?? alertRow?.confidence,
         affected_entities: alert_context.affected_entities ?? alertRow?.affected_entities,
         monitoring_event_id: alert_context.monitoring_event_id ?? alertRow?.monitoring_event_id,
-        primary_impact_id: alert_context.primary_impact_id ?? alertRow?.primary_impact_id,
+        primary_impact_id: alert_context.primary_impact_id ?? alertRow?.primary_impact_id
       };
     }
-
     // Fast path: cancellation
     if (isCancellation(message)) {
-      return new Response(
-        JSON.stringify({
-          message: "No problem, your itinerary hasn't been changed.",
-          mode: 'cancelled',
-          proposal: null,
-          suggestions: [],
-          context_used: { itinerary_available: false, health_available: false, friction_available: false, issues_available: false },
-          trip_id,
-          itinerary_id: itinerary_id ?? null,
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({
+        message: "No problem, your itinerary hasn't been changed.",
+        mode: 'cancelled',
+        proposal: null,
+        suggestions: [],
+        context_used: {
+          itinerary_available: false,
+          health_available: false,
+          friction_available: false,
+          issues_available: false
+        },
+        trip_id,
+        itinerary_id: itinerary_id ?? null
+      }), {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
     }
-
     // ── Fetch trip context ──────────────────────────────────────────────
     // The caller's own header, not the service-role key: get-copilot-context
     // authenticates with auth.getUser(), which the service-role key fails.
     // The caller has already been proven to own this trip.
-    let context: any = null;
+    let context = null;
     let contextUsed = {
       itinerary_available: false,
       health_available: false,
       friction_available: false,
-      issues_available: false,
+      issues_available: false
     };
-
     const contextUrl = `${supabaseUrl}/functions/v1/get-copilot-context?trip_id=${encodeURIComponent(trip_id)}${itinerary_id ? `&itinerary_id=${encodeURIComponent(itinerary_id)}` : ''}`;
-
     try {
-      const contextRes = await fetch(contextUrl, { headers: { Authorization: authHeader } });
+      const contextRes = await fetch(contextUrl, {
+        headers: {
+          Authorization: authHeader
+        }
+      });
       if (contextRes.ok) {
         context = await contextRes.json();
         contextUsed = {
           itinerary_available: !!(context.itinerary || context.days?.length > 0),
           health_available: !!context.health,
           friction_available: !!(context.friction?.days?.length > 0),
-          issues_available: !!(context.issues?.length > 0),
+          issues_available: !!(context.issues?.length > 0)
         };
       } else {
         console.error(`[copilot-chat] get-copilot-context ${contextRes.status}: ${(await contextRes.text()).slice(0, 300)}`);
-        context = { trip, partial: true };
+        context = {
+          trip,
+          partial: true
+        };
       }
     } catch (e) {
       console.error('[copilot-chat] get-copilot-context unreachable:', e instanceof Error ? e.message : String(e));
-      context = { trip, partial: true };
+      context = {
+        trip,
+        partial: true
+      };
     }
-
     const today = new Date().toISOString().split('T')[0];
     const destination = trip.destination || context?.trip?.destination || 'your destination';
-    const contextFormatted = formatContextForPrompt(context);
+    const contextFormatted = formatContextForPrompt(context, trip.primary_tz);
     const isFirstMessage = conversation_history.length === 0;
-
     // ── APPROVAL PATH ──────────────────────────────────────────────────
     const resolvedProposalId = active_proposal_id ?? extractProposalIdFromHistory(conversation_history);
-
     if (isApprovalMessage(message) && resolvedProposalId) {
-      const result = await executeProposal(
-        supabase,
-        supabaseUrl,
-        serviceRoleKey,
-        resolvedProposalId,
-        user.id,
-        trip_id
-      );
-
-      return new Response(
-        JSON.stringify({
-          message: result.message,
-          mode: result.stale ? 'stale' : result.executed ? 'executed' : 'failed',
-          executed: result.executed,
-          stale: result.stale ?? false,
-          failed: result.failed ?? false,
-          new_version_id: result.new_version_id ?? null,
-          proposal: null,
-          suggestions: enrichedAlertCtx ? buildAlertSuggestions(enrichedAlertCtx) : [],
-          context_used: contextUsed,
-          trip_id,
-          itinerary_id: itinerary_id ?? null,
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      // MEMBERSHIP 2026-09-25 - viewers may ask, not apply. See the gate above.
+      if (!canApplyChanges) {
+        return new Response(JSON.stringify({
+          error: 'FORBIDDEN',
+          message: "You have view-only access to this trip, so I can't apply changes to it. Ask an organizer to approve this one."
+        }), {
+          status: 403,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json'
+          }
+        });
+      }
+      const result = await executeProposal(supabase, supabaseUrl, serviceRoleKey, resolvedProposalId, user.id, trip_id);
+      return new Response(JSON.stringify({
+        message: result.message,
+        mode: result.stale ? 'stale' : result.executed ? 'executed' : 'failed',
+        executed: result.executed,
+        stale: result.stale ?? false,
+        failed: result.failed ?? false,
+        new_version_id: result.new_version_id ?? null,
+        proposal: null,
+        suggestions: enrichedAlertCtx ? buildAlertSuggestions(enrichedAlertCtx) : [],
+        context_used: contextUsed,
+        trip_id,
+        itinerary_id: itinerary_id ?? null
+      }), {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
     }
-
     // ── PROPOSAL GENERATION PATH ─────────────────────────────────────────
     if (enrichedAlertCtx && isProposalRequest(message)) {
-      const { proposal, aiMessage, proposalId } = await generateProposal(
-        supabase,
-        openrouterKey,
-        user.id,
+      const { proposal, aiMessage, proposalId } = await generateProposal(supabase, openrouterKey, user.id, trip_id, message, enrichedAlertCtx, alertImpact, contextFormatted, itinerary_id ?? alert_context?.itinerary_version_id ?? null);
+      return new Response(JSON.stringify({
+        message: aiMessage,
+        mode: 'proposal',
+        proposal: proposal ? {
+          ...proposal,
+          id: proposalId ?? proposal.id
+        } : null,
+        executed: false,
+        stale: false,
+        failed: false,
+        suggestions: [
+          'Apply this plan',
+          'Show me other options',
+          'What are the trade-offs?',
+          'What stays the same?'
+        ],
+        context_used: contextUsed,
         trip_id,
-        message,
-        enrichedAlertCtx,
-        alertImpact,
-        contextFormatted,
-        itinerary_id ?? alert_context?.itinerary_version_id ?? null
-      );
-
-      return new Response(
-        JSON.stringify({
-          message: aiMessage,
-          mode: 'proposal',
-          proposal: proposal ? { ...proposal, id: proposalId ?? proposal.id } : null,
-          executed: false,
-          stale: false,
-          failed: false,
-          suggestions: [
-            'Apply this plan',
-            'Show me other options',
-            'What are the trade-offs?',
-            'What stays the same?',
-          ],
-          context_used: contextUsed,
-          trip_id,
-          itinerary_id: itinerary_id ?? null,
-          alert_stale: alertStale,
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+        itinerary_id: itinerary_id ?? null,
+        alert_stale: alertStale
+      }), {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
     }
-
     // ── ACTION PLANNING PATH (non-alert) ────────────────────────────────────
     const classifyRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -1245,15 +1270,15 @@ Deno.serve(async (req: Request) => {
         'Authorization': `Bearer ${openrouterKey}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': 'https://travelos.app',
-        'X-Title': 'TravelOS Copilot',
+        'X-Title': 'TravelOS Copilot'
       },
       body: JSON.stringify({
         model: 'google/gemini-3.5-flash',
         messages: [
           {
             role: 'user',
-            content: `Classify this message as "information", "action", "approval", or "cancel":\n- "information": asking about the trip, requesting analysis\n- "action": requesting a change, modification, addition, removal\n- "approval": explicitly approving/confirming a previously proposed change\n- "cancel": cancelling/rejecting a proposal\n\nExamples:\n"What's on day 2?" -> information\n"Move my dinner to 7pm" -> action\n"Reschedule the museum visit to 2pm" -> action\n"Yes, do it" -> approval\n"Never mind" -> cancel\n\nMessage: "${message.replace(/"/g, '\\"')}"\n\nReply with ONLY one word: information, action, approval, or cancel.`,
-          },
+            content: `Classify this message as "information", "action", "approval", or "cancel":\n- "information": asking about the trip, requesting analysis\n- "action": requesting a change, modification, addition, removal\n- "approval": explicitly approving/confirming a previously proposed change\n- "cancel": cancelling/rejecting a proposal\n\nExamples:\n"What's on day 2?" -> information\n"Move my dinner to 7pm" -> action\n"Reschedule the museum visit to 2pm" -> action\n"Yes, do it" -> approval\n"Never mind" -> cancel\n\nMessage: "${message.replace(/"/g, '\\"')}"\n\nReply with ONLY one word: information, action, approval, or cancel.`
+          }
         ],
         // FIX 2026-09-22: caught live returning an empty content string at
         // max_tokens: 5 and again at 10 — this model appears to spend part
@@ -1262,10 +1287,9 @@ Deno.serve(async (req: Request) => {
         // room; the keyword-heuristic fallback right below still covers a
         // genuinely empty or unparseable reply either way.
         max_tokens: 30,
-        temperature: 0,
-      }),
+        temperature: 0
+      })
     });
-
     // FIX 2026-09-22: caught live — a real "move X to Y" request fell all
     // the way through to the default 'information' mode (which tells the
     // model "do NOT modify the itinerary"), producing a flat refusal even
@@ -1282,7 +1306,7 @@ Deno.serve(async (req: Request) => {
     // real request is worse than occasionally over-triggering the proposal
     // path (which itself explains its findings before touching anything).
     const ACTION_VERB_PATTERN = /\b(move|change|reschedule|shift|adjust|modify|update|add|remove|delete|cancel|swap|replace|switch|push|delay|bump|book|rebook)\b/i;
-    let messageMode: 'information' | 'action' | 'approval' | 'cancel' = 'information';
+    let messageMode = 'information';
     if (classifyRes.ok) {
       const classifyData = await classifyRes.json();
       const classifyText = (classifyData.choices?.[0]?.message?.content ?? '').toLowerCase().trim();
@@ -1298,31 +1322,28 @@ Deno.serve(async (req: Request) => {
       console.error('[copilot-chat] classifier failed, falling back to keyword heuristic:', classifyRes.status, (await classifyRes.text()).slice(0, 200));
       messageMode = isCancellation(message) ? 'cancel' : isApprovalMessage(message) ? 'approval' : ACTION_VERB_PATTERN.test(message) ? 'action' : 'information';
     }
-
     if (enrichedAlertCtx && isFirstMessage) messageMode = 'information';
-
     // ── CANCEL ─────────────────────────────────────────────────────────
     if (messageMode === 'cancel') {
-      return new Response(
-        JSON.stringify({
-          message: "No problem, your itinerary hasn't been changed.",
-          mode: 'cancelled',
-          proposal: null,
-          suggestions: [],
-          context_used: contextUsed,
-          trip_id,
-          itinerary_id: itinerary_id ?? null,
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({
+        message: "No problem, your itinerary hasn't been changed.",
+        mode: 'cancelled',
+        proposal: null,
+        suggestions: [],
+        context_used: contextUsed,
+        trip_id,
+        itinerary_id: itinerary_id ?? null
+      }), {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
     }
-
     // ── ACTION PLANNING (non-alert) ────────────────────────────────────────
     if (messageMode === 'action') {
-      const alertPreamble = enrichedAlertCtx
-        ? `${buildAlertSystemPromptSection(enrichedAlertCtx, alertImpact, alertStale)}\n\n`
-        : '';
-
+      const alertPreamble = enrichedAlertCtx ? `${buildAlertSystemPromptSection(enrichedAlertCtx, alertImpact, alertStale)}\n\n` : '';
       const actionSystemPrompt = `${alertPreamble}You are TravelOS, an expert AI travel planner. The traveler wants to make a change to their trip.
 
 Your job is to:
@@ -1340,6 +1361,8 @@ CRITICAL RULES:
 - If the request is ambiguous, ask ONE clarifying question
 - If multiple solutions exist, offer up to 3 options
 - Never invent prices, times, distances, or availability
+- Each entry in proposed_changes is an object with: "type" (MOVE|RESCHEDULE|ADD|REMOVE|REPLACE), "activity_name" (the item's exact title), "item_id" (if known, else null), "description" (one plain sentence using local times, e.g. "Move Visit 9/11 Memorial from Sun, Dec 6, 10:00 AM to Sun, Dec 6, 2:00 PM"), "original_start_time" and "proposed_start_time" (ISO 8601 local time with UTC offset, per the TIME ZONE rule)
+- In response_message, say times as local times (e.g. "2:00 PM"), never UTC
 
 TRIP CONTEXT:
 ${contextFormatted}
@@ -1362,21 +1385,26 @@ Respond in this exact JSON format (no markdown, no code fences, raw JSON only):
   "before_snapshot": { "day_number": null, "activity_count": null, "friction_score": null, "friction_status": null, "pace": null },
   "suggestions": []
 }`;
-
       const actionRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${openrouterKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://travelos.app',
-          'X-Title': 'TravelOS Copilot',
+          'X-Title': 'TravelOS Copilot'
         },
         body: JSON.stringify({
           model: 'google/gemini-3.5-flash',
           messages: [
-            { role: 'system', content: actionSystemPrompt },
+            {
+              role: 'system',
+              content: actionSystemPrompt
+            },
             ...conversation_history.slice(-10),
-            { role: 'user', content: message },
+            {
+              role: 'user',
+              content: message
+            }
           ],
           // FIX 2026-09-22: was max_tokens: 1200 with no response_format.
           // Once get-copilot-context started returning real itinerary data
@@ -1389,24 +1417,28 @@ Respond in this exact JSON format (no markdown, no code fences, raw JSON only):
           // chat reply. response_format forces the API to return valid JSON
           // outright (matching change-plan's own OpenRouter calls); the
           // higher ceiling gives the full structured object room to finish.
-          response_format: { type: 'json_object' },
+          response_format: {
+            type: 'json_object'
+          },
           max_tokens: 3000,
-          temperature: 0.3,
-        }),
+          temperature: 0.3
+        })
       });
-
       if (!actionRes.ok) {
         console.error('[copilot-chat] OpenRouter action error:', actionRes.status, (await actionRes.text()).slice(0, 300));
-        return new Response(
-          JSON.stringify({ error: "I'm having trouble connecting right now. Please try again." }),
-          { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        return new Response(JSON.stringify({
+          error: "I'm having trouble connecting right now. Please try again."
+        }), {
+          status: 502,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json'
+          }
+        });
       }
-
       const actionData = await actionRes.json();
       const rawContent = actionData.choices?.[0]?.message?.content ?? '{}';
-
-      let proposal: any = {};
+      let proposal = {};
       try {
         const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
         proposal = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
@@ -1418,10 +1450,7 @@ Respond in this exact JSON format (no markdown, no code fences, raw JSON only):
         // broken; never forward broken model output as if it were a chat
         // message. Log it for debugging and tell the traveler plainly that
         // this attempt didn't work, instead.
-        console.error(
-          '[copilot-chat] action-planning JSON parse failed:', parseErr instanceof Error ? parseErr.message : String(parseErr),
-          '| raw (first 500 chars):', rawContent.slice(0, 500)
-        );
+        console.error('[copilot-chat] action-planning JSON parse failed:', parseErr instanceof Error ? parseErr.message : String(parseErr), '| raw (first 500 chars):', rawContent.slice(0, 500));
         proposal = {
           response_message: "I wasn't able to put together a clean proposal for that just now — could you try rephrasing the request, or asking again?",
           proposal_status: 'NOT_FEASIBLE',
@@ -1430,22 +1459,25 @@ Respond in this exact JSON format (no markdown, no code fences, raw JSON only):
           affected_days: [],
           proposed_changes: [],
           preserved_constraints: [],
-          expected_effects: { friction_change: 'UNKNOWN', pace_change: 'UNKNOWN', walking_change: 'UNKNOWN', budget_change: 'UNKNOWN', summary: '' },
+          expected_effects: {
+            friction_change: 'UNKNOWN',
+            pace_change: 'UNKNOWN',
+            walking_change: 'UNKNOWN',
+            budget_change: 'UNKNOWN',
+            summary: ''
+          },
           warnings: [],
           options: [],
           confidence: 'LOW',
           before_snapshot: null,
-          suggestions: [],
+          suggestions: []
         };
       }
-
       const proposalStatus = proposal.proposal_status ?? 'NOT_FEASIBLE';
-      let proposalId: string | null = null;
-
+      let proposalId = null;
       if (proposalStatus === 'READY_FOR_REVIEW' || proposalStatus === 'REQUIRES_CLARIFICATION') {
         const activeVersion = await getActiveItineraryVersion(supabase, trip_id);
         const baseVersionId = itinerary_id ?? activeVersion?.id ?? null;
-
         // FIX 2026-09-22: this is the exact failure caught live in the edge
         // logs — "Could not find the 'expected_result' column of
         // 'copilot_proposals' in the schema cache". goal, protected_items,
@@ -1456,80 +1488,73 @@ Respond in this exact JSON format (no markdown, no code fences, raw JSON only):
         // interpreted_goal, preserved_constraints, expected_effects (jsonb —
         // trade_offs has no column and isn't persisted), plus affected_days /
         // warnings / options, which were being silently dropped too.
-        const { data: savedProposal, error: saveError } = await supabase
-          .from('copilot_proposals')
-          .insert({
-            user_id: user.id,
-            trip_id,
-            itinerary_version_id: baseVersionId,
-            base_itinerary_version_id: baseVersionId,
-            user_request: message,
-            interpreted_goal: proposal.interpreted_goal ?? message,
-            affected_days: proposal.affected_days ?? [],
-            proposed_changes: proposal.proposed_changes ?? [],
-            preserved_constraints: proposal.preserved_constraints ?? [],
-            expected_effects: proposal.expected_effects ?? {},
-            warnings: proposal.warnings ?? [],
-            options: proposal.options ?? [],
-            confidence: proposal.confidence ?? 'MEDIUM',
-            what_will_change: proposal.expected_effects?.summary ?? '',
-            what_will_stay: (proposal.preserved_constraints ?? []).join(', '),
-            why_recommended: '',
-            affected_items: [],
-            // FIX 2026-09-22: 'PENDING' is not a value copilot_proposals.status
-            // allows — caught live in the edge logs ("violates check
-            // constraint copilot_proposals_status_check"). This insert has
-            // been failing on every single call, so proposalId was always
-            // null and there was never anything for "yes, do it" to execute.
-            // 'READY_FOR_REVIEW' is a real allowed value and matches this
-            // proposalStatus case exactly (this insert only runs for
-            // READY_FOR_REVIEW or REQUIRES_CLARIFICATION); DRAFT is the
-            // closest real status for the clarification case, since the
-            // proposal isn't actually ready to execute yet.
-            status: proposalStatus === 'READY_FOR_REVIEW' ? 'READY_FOR_REVIEW' : 'DRAFT',
-            alert_id: enrichedAlertCtx?.alert_id ?? null,
-            stale_checked_at: new Date().toISOString(),
-          })
-          .select('id')
-          .single();
-
+        const { data: savedProposal, error: saveError } = await supabase.from('copilot_proposals').insert({
+          user_id: user.id,
+          trip_id,
+          itinerary_version_id: baseVersionId,
+          base_itinerary_version_id: baseVersionId,
+          user_request: message,
+          interpreted_goal: proposal.interpreted_goal ?? message,
+          affected_days: proposal.affected_days ?? [],
+          proposed_changes: proposal.proposed_changes ?? [],
+          preserved_constraints: proposal.preserved_constraints ?? [],
+          expected_effects: proposal.expected_effects ?? {},
+          warnings: proposal.warnings ?? [],
+          options: proposal.options ?? [],
+          confidence: proposal.confidence ?? 'MEDIUM',
+          what_will_change: proposal.expected_effects?.summary ?? '',
+          what_will_stay: (proposal.preserved_constraints ?? []).join(', '),
+          why_recommended: '',
+          affected_items: [],
+          // FIX 2026-09-22: 'PENDING' is not a value copilot_proposals.status
+          // allows — caught live in the edge logs ("violates check
+          // constraint copilot_proposals_status_check"). This insert has
+          // been failing on every single call, so proposalId was always
+          // null and there was never anything for "yes, do it" to execute.
+          // 'READY_FOR_REVIEW' is a real allowed value and matches this
+          // proposalStatus case exactly (this insert only runs for
+          // READY_FOR_REVIEW or REQUIRES_CLARIFICATION); DRAFT is the
+          // closest real status for the clarification case, since the
+          // proposal isn't actually ready to execute yet.
+          status: proposalStatus === 'READY_FOR_REVIEW' ? 'READY_FOR_REVIEW' : 'DRAFT',
+          alert_id: enrichedAlertCtx?.alert_id ?? null,
+          stale_checked_at: new Date().toISOString()
+        }).select('id').single();
         if (!saveError && savedProposal) proposalId = savedProposal.id;
         else console.error('[copilot-chat] failed to save action proposal:', saveError?.message);
       }
-
-      return new Response(
-        JSON.stringify({
-          message: proposal.response_message ?? "I've analyzed your request.",
-          mode: 'action_planning',
-          proposal: {
-            proposal_id: proposalId,
-            status: proposalStatus,
-            interpreted_goal: proposal.interpreted_goal ?? '',
-            clarification_question: proposal.clarification_question ?? null,
-            affected_days: proposal.affected_days ?? [],
-            proposed_changes: proposal.proposed_changes ?? [],
-            preserved_constraints: proposal.preserved_constraints ?? [],
-            expected_effects: proposal.expected_effects ?? {},
-            warnings: proposal.warnings ?? [],
-            options: proposal.options ?? [],
-            confidence: proposal.confidence ?? 'MEDIUM',
-            before_snapshot: proposal.before_snapshot ?? null,
-          },
-          suggestions: proposal.suggestions ?? (enrichedAlertCtx ? buildAlertSuggestions(enrichedAlertCtx) : []),
-          context_used: contextUsed,
-          trip_id,
-          itinerary_id: itinerary_id ?? null,
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({
+        message: proposal.response_message ?? "I've analyzed your request.",
+        mode: 'action_planning',
+        proposal: {
+          proposal_id: proposalId,
+          status: proposalStatus,
+          interpreted_goal: proposal.interpreted_goal ?? '',
+          clarification_question: proposal.clarification_question ?? null,
+          affected_days: proposal.affected_days ?? [],
+          proposed_changes: proposal.proposed_changes ?? [],
+          preserved_constraints: proposal.preserved_constraints ?? [],
+          expected_effects: proposal.expected_effects ?? {},
+          warnings: proposal.warnings ?? [],
+          options: proposal.options ?? [],
+          confidence: proposal.confidence ?? 'MEDIUM',
+          before_snapshot: proposal.before_snapshot ?? null
+        },
+        suggestions: proposal.suggestions ?? (enrichedAlertCtx ? buildAlertSuggestions(enrichedAlertCtx) : []),
+        context_used: contextUsed,
+        trip_id,
+        itinerary_id: itinerary_id ?? null
+      }), {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
     }
-
     // ── INFORMATION (default) ──────────────────────────────────────────────
-    const alertSystemSection = enrichedAlertCtx
-      ? buildAlertSystemPromptSection(enrichedAlertCtx, alertImpact, alertStale)
-      : null;
-
-    let systemPrompt: string;
+    const alertSystemSection = enrichedAlertCtx ? buildAlertSystemPromptSection(enrichedAlertCtx, alertImpact, alertStale) : null;
+    let systemPrompt;
     if (enrichedAlertCtx && alertSystemSection) {
       const openingInstruction = isFirstMessage ? buildAlertOpeningInstruction(enrichedAlertCtx) : '';
       systemPrompt = `${alertSystemSection}\n\n${openingInstruction}You are TravelOS, an expert AI travel assistant helping a traveler with a Travel Alert affecting their trip.
@@ -1559,39 +1584,46 @@ ${contextFormatted}
 
 Today's date: ${today}`;
     }
-
     const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${openrouterKey}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': 'https://travelos.app',
-        'X-Title': 'TravelOS Copilot',
+        'X-Title': 'TravelOS Copilot'
       },
       body: JSON.stringify({
         model: 'google/gemini-3.5-flash',
         messages: [
-          { role: 'system', content: systemPrompt },
+          {
+            role: 'system',
+            content: systemPrompt
+          },
           ...conversation_history.slice(-10),
-          { role: 'user', content: message },
+          {
+            role: 'user',
+            content: message
+          }
         ],
         max_tokens: 800,
-        temperature: 0.3,
-      }),
+        temperature: 0.3
+      })
     });
-
     if (!aiRes.ok) {
       console.error('[copilot-chat] OpenRouter error:', aiRes.status, (await aiRes.text()).slice(0, 300));
-      return new Response(
-        JSON.stringify({ error: "I'm having trouble connecting right now. Please try again." }),
-        { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({
+        error: "I'm having trouble connecting right now. Please try again."
+      }), {
+        status: 502,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
     }
-
     const aiData = await aiRes.json();
     const aiMessage = aiData.choices?.[0]?.message?.content ?? "I'm having trouble connecting right now. Please try again.";
-
-    let suggestions: string[] = enrichedAlertCtx ? buildAlertSuggestions(enrichedAlertCtx) : [];
+    let suggestions = enrichedAlertCtx ? buildAlertSuggestions(enrichedAlertCtx) : [];
     if (!enrichedAlertCtx) {
       try {
         const suggestRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -1600,17 +1632,19 @@ Today's date: ${today}`;
             'Authorization': `Bearer ${openrouterKey}`,
             'Content-Type': 'application/json',
             'HTTP-Referer': 'https://travelos.app',
-            'X-Title': 'TravelOS Copilot',
+            'X-Title': 'TravelOS Copilot'
           },
           body: JSON.stringify({
             model: 'google/gemini-3.5-flash',
-            messages: [{
-              role: 'user',
-              content: `Based on this conversation about a trip to ${destination}, suggest 2-3 short follow-up questions the traveler might want to ask next. Return as a JSON array of strings only, no explanation. Keep each under 8 words.`,
-            }],
+            messages: [
+              {
+                role: 'user',
+                content: `Based on this conversation about a trip to ${destination}, suggest 2-3 short follow-up questions the traveler might want to ask next. Return as a JSON array of strings only, no explanation. Keep each under 8 words.`
+              }
+            ],
             max_tokens: 150,
-            temperature: 0.5,
-          }),
+            temperature: 0.5
+          })
         });
         if (suggestRes.ok) {
           const suggestData = await suggestRes.json();
@@ -1624,25 +1658,32 @@ Today's date: ${today}`;
         console.error('[copilot-chat] suggestions call threw:', e instanceof Error ? e.message : String(e));
       }
     }
-
-    return new Response(
-      JSON.stringify({
-        message: aiMessage,
-        mode: 'information',
-        proposal: null,
-        suggestions,
-        context_used: contextUsed,
-        trip_id,
-        itinerary_id: itinerary_id ?? null,
-        alert_stale: enrichedAlertCtx ? alertStale : undefined,
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    return new Response(JSON.stringify({
+      message: aiMessage,
+      mode: 'information',
+      proposal: null,
+      suggestions,
+      context_used: contextUsed,
+      trip_id,
+      itinerary_id: itinerary_id ?? null,
+      alert_stale: enrichedAlertCtx ? alertStale : undefined
+    }), {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
   } catch (err) {
     console.error('[copilot-chat] unhandled error:', err);
-    return new Response(
-      JSON.stringify({ error: "I'm having trouble connecting right now. Please try again." }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    return new Response(JSON.stringify({
+      error: "I'm having trouble connecting right now. Please try again."
+    }), {
+      status: 500,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
   }
 });

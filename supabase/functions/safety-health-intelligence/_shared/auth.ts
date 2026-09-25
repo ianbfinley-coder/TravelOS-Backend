@@ -101,8 +101,28 @@ function bearer(req) {
  * Confirms the caller owns the trip. `trips.user_id` is a uuid and matches
  * auth.uid() directly. Returns 404 rather than 403 so a caller cannot probe
  * which trip ids exist.
+ *
+ * ERROR VS ABSENCE 2026-09-19 — this used to destructure `data` only:
+ *
+ *   const { data } = await service.from('trips')...maybeSingle();
+ *   if (!data) return fail('Trip not found', 404);
+ *
+ * which turned every failed query — a dropped connection, a PostgREST 42703
+ * from a column rename, an exhausted pool — into "Trip not found" against the
+ * owner's own trip, and logged nothing. That is this project's recurring
+ * defect: a failed call read as an absent answer. A failure is now a 500 that
+ * says so and is logged; only a query that succeeded and returned no row is a
+ * 404. The 404-not-403 choice for a genuine miss is unchanged, so trip ids
+ * still cannot be enumerated.
+ *
+ * NOTE: `_shared/auth.ts` is deployed per function, so this fix currently
+ * applies only to the functions redeployed since. Propagate it.
  */ export async function requireTripOwner(service, tripId, userId) {
-  const { data } = await service.from('trips').select('id').eq('id', tripId).eq('user_id', userId).maybeSingle();
+  const { data, error } = await service.from('trips').select('id').eq('id', tripId).eq('user_id', userId).maybeSingle();
+  if (error) {
+    console.error('[auth] trip ownership check failed:', error.message);
+    return fail('Trip ownership could not be verified', 500);
+  }
   if (!data) return fail('Trip not found', 404);
   return true;
 }
@@ -118,6 +138,7 @@ function bearer(req) {
  * filtering on a fixed value matches nothing — a check that looks secure and
  * silently denies everyone.
  */ export async function resolvePlatformUserId(service, authUserId) {
-  const { data } = await service.from('auth_identities').select('user_id').eq('provider_subject', authUserId).maybeSingle();
+  const { data, error } = await service.from('auth_identities').select('user_id').eq('provider_subject', authUserId).maybeSingle();
+  if (error) console.error('[auth] auth_identities lookup failed:', error.message);
   return data?.user_id ?? null;
 }

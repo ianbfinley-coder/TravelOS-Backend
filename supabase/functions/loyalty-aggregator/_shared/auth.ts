@@ -9,6 +9,16 @@
 //
 // Use this instead of writing a new gate. Deploy it alongside a function as
 // `_shared/auth.ts` and import with `./_shared/auth.ts`.
+//
+// WARNING 2026-09-19 — never build a service client like this:
+//   createClient(URL, SERVICE_ROLE_KEY, { global: { headers: { Authorization: userJwt } } })
+// PostgREST takes the role from the Authorization JWT, so that client runs as
+// `authenticated`, not `service_role`, and RLS applies to it. Many tables in
+// this project have RLS enabled with NO policies, which denies the
+// authenticated role everything — and a policy denial on a SELECT is an empty
+// result, not an error, so the function looks like it is reading an empty
+// database. recovery-assist was built this way and every one of its routes
+// silently returned nothing for its entire life. Use serviceClient() below.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 export const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 export const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY');
@@ -102,7 +112,8 @@ function bearer(req) {
  * auth.uid() directly. Returns 404 rather than 403 so a caller cannot probe
  * which trip ids exist.
  */ export async function requireTripOwner(service, tripId, userId) {
-  const { data } = await service.from('trips').select('id').eq('id', tripId).eq('user_id', userId).maybeSingle();
+  const { data, error } = await service.from('trips').select('id').eq('id', tripId).eq('user_id', userId).maybeSingle();
+  if (error) console.error('[auth] trips ownership lookup failed:', error.message);
   if (!data) return fail('Trip not found', 404);
   return true;
 }
@@ -118,6 +129,7 @@ function bearer(req) {
  * filtering on a fixed value matches nothing — a check that looks secure and
  * silently denies everyone.
  */ export async function resolvePlatformUserId(service, authUserId) {
-  const { data } = await service.from('auth_identities').select('user_id').eq('provider_subject', authUserId).maybeSingle();
+  const { data, error } = await service.from('auth_identities').select('user_id').eq('provider_subject', authUserId).maybeSingle();
+  if (error) console.error('[auth] auth_identities lookup failed:', error.message);
   return data?.user_id ?? null;
 }

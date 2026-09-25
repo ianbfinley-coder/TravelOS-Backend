@@ -9,6 +9,8 @@
 //
 // Use this instead of writing a new gate. Deploy it alongside a function as
 // `_shared/auth.ts` and import with `./_shared/auth.ts`.
+//
+// The reference implementation this generalises is `update-issue-status`.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 export const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 export const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY');
@@ -54,11 +56,12 @@ function bearer(req) {
  * Verifies the caller's JWT and returns their auth.uid().
  *
  * NEVER accept an identity from the request body. Seven functions in this
- * codebase did, which let any caller act as any user.
+ * codebase did, which let any caller act as any user. The whole point of this
+ * helper is that the id it returns cannot be forged by the caller.
  *
- * Note the deliberate rejection of a bare presence check: seven other functions
- * used `if (!authHeader) return 401`, which `Authorization: x` passes because
- * the token is never decoded.
+ * Returns a Response to send on failure. Note the deliberate rejection of a
+ * bare presence check: seven other functions used `if (!authHeader) return 401`,
+ * which `Authorization: x` passes because the token is never decoded.
  */ export async function requireUser(req) {
   const token = bearer(req);
   if (!token) return fail('Missing or invalid Authorization header', 401);
@@ -99,8 +102,9 @@ function bearer(req) {
 }
 /**
  * Confirms the caller owns the trip. `trips.user_id` is a uuid and matches
- * auth.uid() directly. Returns 404 rather than 403 so a caller cannot probe
- * which trip ids exist.
+ * auth.uid() directly.
+ *
+ * Returns 404 rather than 403 so a caller cannot probe which trip ids exist.
  */ export async function requireTripOwner(service, tripId, userId) {
   const { data } = await service.from('trips').select('id').eq('id', tripId).eq('user_id', userId).maybeSingle();
   if (!data) return fail('Trip not found', 404);

@@ -1,6 +1,25 @@
+// ISSUE LIFECYCLE 2026-09-25 — stop blanket-resolving trip issues.
+//   After an apply this function marked EVERY OPEN/ACKNOWLEDGED trip_issues row
+//   for the trip RESOLVED, whether or not the change touched it — a one-item
+//   edit on day 5 silently "resolved" an overbooked day 2. That update is gone.
+//   Instead, when a new itinerary_versions row was written, detect-trip-issues
+//   is re-run in the background (service key, { trip_id, version_id:
+//   newVersionId, user_id, force_refresh: true }); it resolves exactly the
+//   issues it no longer sees. The call is awaited inside EdgeRuntime.waitUntil
+//   and a failure is logged, never fatal. Nothing else in this function changed
+//   (the response fields, including pipeline_note, are as before).
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { requireUserOrService, serviceClient } from "./_shared/auth.ts";
-
+import { requireUserOrService, serviceClient, resolvePlatformUserId } from "./_shared/auth.ts";
+// ITINERARY RECONCILIATION 2026-09-24: membership instead of owner-only; bumps trips.version; returns previous_version_id
+//   - User callers are authorized by an active trip_members row (kind
+//     'account', removed_at null) for their platform id (auth_identities
+//     .provider_subject = auth.uid()). owner/organizer/member may edit;
+//     viewer gets 403 FORBIDDEN; non-members still get 404. Service callers
+//     are unchanged.
+//   - After an apply that wrote at least one op, trips.version is incremented
+//     (compare-and-swap) so replan-engine's optimistic check sees the edit.
+//     Failure is logged, never fatal.
+//   - The applied response now includes previous_version_id.
 // SECURITY 2026-09-16 — read, tamper and destroy, in one anonymous call.
 //
 // This function had no authentication whatsoever. `serve()` went straight to
@@ -107,39 +126,81 @@ import { requireUserOrService, serviceClient } from "./_shared/auth.ts";
 // (executeProposal's request body, and getActiveItineraryVersion's use of a
 // nonexistent `source` column and a `status = 'ACTIVE'` check that should
 // have been `is_active = true`).
-
-const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+// 2026-09-25 — awaited background call to a sibling function; failures are
+// logged with status and a body prefix, never thrown.
+function backgroundCall(label, slug, payload) {
+  const task = (async ()=>{
+    try {
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/${slug}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!resp.ok) {
+        const detail = await resp.text().catch(()=>"<unreadable>");
+        console.error(`[change-plan] ${label} failed: HTTP ${resp.status} ${detail.slice(0, 300)}`);
+      }
+    } catch (e) {
+      console.error(`[change-plan] ${label} threw:`, e);
+    }
+  })();
+  // deno-lint-ignore no-explicit-any
+  const rt = globalThis.EdgeRuntime;
+  if (rt?.waitUntil) rt.waitUntil(task);
+}
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type"
 };
-
 // Columns on itinerary_items the model is allowed to set via an
 // apply-pass operation. Anything else in a "fields" object is dropped
 // silently rather than passed through to the insert/update — this is the
 // same anonymous-tamper-class concern the 2026-09-16 SECURITY note above was
 // written about, just applied to the new flat-item write path.
 const ITEM_WRITABLE_FIELDS = new Set([
-  "title", "type", "category", "status", "date", "start_time", "end_time",
-  "timezone", "duration_min", "location", "notes", "country_code",
-  "transport_mode", "party_size", "place_id", "lat", "lng",
-  "fixed", "outdoor", "must_do", "starred", "suggested", "droppable", "critical",
-  "hold_minutes", "energy_cost",
+  "title",
+  "type",
+  "category",
+  "status",
+  "date",
+  "start_time",
+  "end_time",
+  "timezone",
+  "duration_min",
+  "location",
+  "notes",
+  "country_code",
+  "transport_mode",
+  "party_size",
+  "place_id",
+  "lat",
+  "lng",
+  "fixed",
+  "outdoor",
+  "must_do",
+  "starred",
+  "suggested",
+  "droppable",
+  "critical",
+  "hold_minutes",
+  "energy_cost"
 ]);
-
-function sanitizeItemFields(fields: Record<string, unknown> | null | undefined): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+function sanitizeItemFields(fields) {
+  const out = {};
   if (!fields) return out;
-  for (const [k, v] of Object.entries(fields)) {
+  for (const [k, v] of Object.entries(fields)){
     if (ITEM_WRITABLE_FIELDS.has(k) && v !== undefined) out[k] = v;
   }
   return out;
 }
-
 // ─── PASS 1: INTERPRET ─────────────────────────────────────────────────────────
 const INTERPRET_PROMPT = `You are a travel planning assistant. Interpret the traveler's change request and determine what modifications to make to their itinerary.
 
@@ -188,7 +249,66 @@ OUTPUT FORMAT:
   "response_message": "string (natural, friendly response to show the user — 1-3 sentences)",
   "preview_required": boolean
 }`;
-
+// ── Trip-local time helpers (FIX 2026-09-23) ─────────────────────────
+// itinerary_items.start_time is timestamptz and arrives as UTC. The model
+// used to see "2026-12-06T15:00:00+00:00", read it as 3 PM, and write the
+// traveler's "2 PM" back as 14:00 UTC (9 AM in New York). Every time the
+// model sees is now converted to the trip's zone with an explicit offset, and
+// it is told to write times back the same way, so Postgres stores the right
+// instant.
+function validTz(tz) {
+  if (!tz) return null;
+  try {
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tz
+    });
+    return tz;
+  } catch  {
+    return null;
+  }
+}
+function parseTs(ts) {
+  let s = String(ts).trim().replace(' ', 'T');
+  if (/[+-]\d{2}$/.test(s)) s += ':00';
+  return new Date(s);
+}
+function toLocalIso(ts, tz) {
+  if (!ts) return ts ?? null;
+  const d = parseTs(ts);
+  if (isNaN(d.getTime())) return String(ts);
+  if (!tz) return d.toISOString().replace('.000Z', 'Z');
+  const p = {};
+  for (const part of new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'longOffset'
+  }).formatToParts(d))p[part.type] = part.value;
+  const off = (p.timeZoneName || 'GMT').replace('GMT', '') || '+00:00';
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}${off}`;
+}
+function toLocalLabel(ts, tz) {
+  if (!ts) return '';
+  const d = parseTs(ts);
+  if (isNaN(d.getTime())) return String(ts);
+  const label = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz ?? 'UTC',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(d);
+  return `${label} (${toLocalIso(ts, tz)})`;
+}
+function timeRule(tz) {
+  return tz ? `TIME ZONE: ${tz}. Every time in this context is local ${tz} time, shown with its UTC offset. Any time you write must also be local ${tz} time as ISO 8601 with the correct UTC offset for that date (for example 2026-12-06T14:00:00-05:00 for 2 PM in New York in December). Never write a local time with "Z" or "+00:00" unless the zone really is UTC.` : `TIME ZONE: unknown. Times are UTC. Write any time as ISO 8601 UTC.`;
+}
 // ─── PASS 2: APPLY ──────────────────────────────────────────────────────────
 // MVP REWRITE 2026-09-21 — this used to ask the model to return a complete
 // rewritten `days` array. There is no such array anymore: itinerary_items is
@@ -201,7 +321,7 @@ CRITICAL RULES:
 2. NEVER modify or delete an item whose "fixed" or "must_do" flag is true, unless the user explicitly asked to change or remove that specific item.
 3. Apply ONLY the specified changes — do not touch items that were not part of the request.
 4. Every "update" or "delete" operation MUST target a real "item_id" from the CURRENT ITEMS list given to you. Every "create" operation must have item_id: null.
-5. Dates are "YYYY-MM-DD". Times are ISO 8601 timestamps (e.g. "2026-11-03T09:00:00Z").
+5. Dates are "YYYY-MM-DD". Times are ISO 8601 timestamps in the trip's local time zone WITH the UTC offset, exactly as the CURRENT ITEMS show them (e.g. "2026-11-03T09:00:00-05:00"). Follow the TIME ZONE line in the trip context. If a requested change already gives a time with an offset, use that instant as given.
 6. If a change cannot be safely applied, add it to "failed_changes" with a reason instead of guessing.
 7. Do not create new time conflicts on the same day.
 8. Be natural and friendly in the response_message.
@@ -233,9 +353,8 @@ OUTPUT FORMAT:
     "impact_notes": ["string"]
   }
 }`;
-
 // ─── UNDO INTENT DETECTION ────────────────────────────────────────────────
-function detectUndoIntent(userRequest: string): boolean {
+function detectUndoIntent(userRequest) {
   const lower = userRequest.toLowerCase().trim();
   const undoPatterns = [
     /^undo$/,
@@ -247,36 +366,20 @@ function detectUndoIntent(userRequest: string): boolean {
     /use the previous plan/,
     /keep the old/,
     /bring back the old/,
-    /undo (the )?last change/,
+    /undo (the )?last change/
   ];
-  return undoPatterns.some(p => p.test(lower));
+  return undoPatterns.some((p)=>p.test(lower));
 }
-
-function detectHistoryIntent(userRequest: string): boolean {
+function detectHistoryIntent(userRequest) {
   const lower = userRequest.toLowerCase();
   return lower.includes("version history") || lower.includes("what versions") || lower.includes("show versions") || lower.includes("list versions");
 }
-
 // ─── HEALTH-AWARE INTENT DETECTION ─────────────────────────────────────────
-function detectHealthQueryIntent(userRequest: string): boolean {
+function detectHealthQueryIntent(userRequest) {
   const lower = userRequest.toLowerCase();
-  return (
-    lower.includes("what should i fix") ||
-    lower.includes("biggest problems") ||
-    lower.includes("what are the problems") ||
-    lower.includes("what's wrong") ||
-    lower.includes("whats wrong") ||
-    lower.includes("top issues") ||
-    lower.includes("health issues") ||
-    lower.includes("trip health") ||
-    lower.includes("what needs attention") ||
-    lower.includes("what needs fixing") ||
-    lower.includes("improve my trip") ||
-    lower.includes("fix my trip")
-  );
+  return lower.includes("what should i fix") || lower.includes("biggest problems") || lower.includes("what are the problems") || lower.includes("what's wrong") || lower.includes("whats wrong") || lower.includes("top issues") || lower.includes("health issues") || lower.includes("trip health") || lower.includes("what needs attention") || lower.includes("what needs fixing") || lower.includes("improve my trip") || lower.includes("fix my trip");
 }
-
-function detectDayFrictionIntent(userRequest: string): { detected: boolean; dayNumber: number | null } {
+function detectDayFrictionIntent(userRequest) {
   const lower = userRequest.toLowerCase();
   const frictionPatterns = [
     /day (\d+) is too busy/,
@@ -286,111 +389,150 @@ function detectDayFrictionIntent(userRequest: string): { detected: boolean; dayN
     /too much friction on day (\d+)/,
     /day (\d+) friction/,
     /lighten day (\d+)/,
-    /simplify day (\d+)/,
+    /simplify day (\d+)/
   ];
-  for (const pattern of frictionPatterns) {
+  for (const pattern of frictionPatterns){
     const match = lower.match(pattern);
     if (match) {
-      return { detected: true, dayNumber: parseInt(match[1], 10) };
+      return {
+        detected: true,
+        dayNumber: parseInt(match[1], 10)
+      };
     }
   }
-  return { detected: false, dayNumber: null };
+  return {
+    detected: false,
+    dayNumber: null
+  };
 }
-
-function generateVersionName(userRequest: string): string {
+function generateVersionName(userRequest) {
   const cleaned = userRequest.replace(/[^a-zA-Z0-9 ,!?]/g, "").trim();
   if (cleaned.length <= 50) return cleaned || "Custom change";
   return cleaned.substring(0, 47).trim() + "...";
 }
-
 // Day 1 = trips.start_date. Returns null when either date is missing.
-function dayNumberFor(itemDate: string | null, tripStartDate: string | null): number | null {
+function dayNumberFor(itemDate, tripStartDate) {
   if (!itemDate || !tripStartDate) return null;
   const d = new Date(`${itemDate}T00:00:00Z`).getTime();
   const s = new Date(`${tripStartDate}T00:00:00Z`).getTime();
   if (Number.isNaN(d) || Number.isNaN(s)) return null;
   return Math.floor((d - s) / 86400000) + 1;
 }
-
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
-
+serve(async (req)=>{
+  if (req.method === "OPTIONS") return new Response(null, {
+    headers: CORS_HEADERS
+  });
   // ── SECURITY GATE — before the body is parsed, before the database is
   // touched, and before a single OpenRouter token is spent. ──────────────────
   const caller = await requireUserOrService(req);
   if (caller instanceof Response) return caller;
-
   const supabase = serviceClient();
-
   try {
-    let body: Record<string, any>;
+    let body;
     try {
       body = await req.json();
-    } catch {
-      return new Response(JSON.stringify({ error: "invalid_json" }), {
-        status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    } catch  {
+      return new Response(JSON.stringify({
+        error: "invalid_json"
+      }), {
+        status: 400,
+        headers: {
+          ...CORS_HEADERS,
+          "Content-Type": "application/json"
+        }
       });
     }
-    const {
-      user_request,
-      trip_id,
-      conversation_history = [],
-      confirmed = false,
-      proposed_changes,
-      itinerary_version_id,
-      proposal_id,
-      alert_id,
-      monitoring_event_id,
-      impact_id,
-      change_summary: requestChangeSummary,
-    } = body;
-
+    const { user_request, trip_id, conversation_history = [], confirmed = false, proposed_changes, itinerary_version_id, proposal_id, alert_id, monitoring_event_id, impact_id, change_summary: requestChangeSummary } = body;
     // Identity comes from the verified token for user callers. `user_id` is
     // no longer read from the body for them.
     const user_id = caller.kind === "user" ? caller.userId : body.user_id;
-
     if (!trip_id || !user_id || !user_request) {
-      return new Response(JSON.stringify({ error: "trip_id and user_request are required" }), {
-        status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      return new Response(JSON.stringify({
+        error: "trip_id and user_request are required"
+      }), {
+        status: 400,
+        headers: {
+          ...CORS_HEADERS,
+          "Content-Type": "application/json"
+        }
       });
     }
-
     // Fetch the trip (replaces the old generated_itineraries fetch).
-    const { data: tripRow } = await supabase
-      .from("trips")
-      .select("id, user_id, destination, title, start_date, end_date")
-      .eq("id", trip_id)
-      .maybeSingle();
-    if (!tripRow) return new Response(JSON.stringify({ error: "Trip not found" }), { status: 404, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
-
-    // OWNERSHIP — trips.user_id is a uuid and compares directly with
-    // auth.uid(). Same 404 as the not-found path above, so a caller cannot
-    // tell "exists but not yours" from "does not exist".
-    if (caller.kind === "user" && tripRow.user_id !== caller.userId) {
-      return new Response(JSON.stringify({ error: "Trip not found" }), { status: 404, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+    const { data: tripRow } = await supabase.from("trips").select("id, user_id, destination, title, start_date, end_date, primary_tz").eq("id", trip_id).maybeSingle();
+    if (!tripRow) return new Response(JSON.stringify({
+      error: "Trip not found"
+    }), {
+      status: 404,
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/json"
+      }
+    });
+    // MEMBERSHIP (ITINERARY RECONCILIATION 2026-09-24) — replaces the old
+    // trips.user_id === auth.uid() owner-only check. Non-members get the same
+    // 404 as the not-found path above, so a caller cannot tell "exists but
+    // not yours" from "does not exist". Viewers are members, so they get 403.
+    if (caller.kind === "user") {
+      const platformUserId = await resolvePlatformUserId(supabase, caller.userId);
+      const { data: memberRow } = platformUserId ? await supabase.from("trip_members").select("role").eq("trip_id", trip_id).eq("user_id", platformUserId).eq("kind", "account").is("removed_at", null).limit(1).maybeSingle() : {
+        data: null
+      };
+      if (!memberRow) {
+        return new Response(JSON.stringify({
+          error: "Trip not found"
+        }), {
+          status: 404,
+          headers: {
+            ...CORS_HEADERS,
+            "Content-Type": "application/json"
+          }
+        });
+      }
+      if (memberRow.role === "viewer") {
+        return new Response(JSON.stringify({
+          error: "FORBIDDEN",
+          message: "View-only members can't change the itinerary."
+        }), {
+          status: 403,
+          headers: {
+            ...CORS_HEADERS,
+            "Content-Type": "application/json"
+          }
+        });
+      }
+      if (![
+        "owner",
+        "organizer",
+        "member"
+      ].includes(memberRow.role)) {
+        return new Response(JSON.stringify({
+          error: "Trip not found"
+        }), {
+          status: 404,
+          headers: {
+            ...CORS_HEADERS,
+            "Content-Type": "application/json"
+          }
+        });
+      }
     }
-
     // ─── STALE VERSION PROTECTION ──────────────────────────────────────────────
     // If itinerary_version_id is provided, verify it is still the active version.
     if (itinerary_version_id) {
-      const { data: activeVersion } = await supabase
-        .from("itinerary_versions")
-        .select("id")
-        .eq("trip_id", trip_id)
-        .eq("is_active", true)
-        .maybeSingle();
-
+      const { data: activeVersion } = await supabase.from("itinerary_versions").select("id").eq("trip_id", trip_id).eq("is_active", true).maybeSingle();
       if (activeVersion && activeVersion.id !== itinerary_version_id) {
-        return new Response(
-          JSON.stringify({
-            error: "STALE_VERSION",
-            message: "The itinerary has changed since this proposal was based on it. Please refresh and try again.",
-          }),
-          { status: 409, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-        );
+        return new Response(JSON.stringify({
+          error: "STALE_VERSION",
+          message: "The itinerary has changed since this proposal was based on it. Please refresh and try again."
+        }), {
+          status: 409,
+          headers: {
+            ...CORS_HEADERS,
+            "Content-Type": "application/json"
+          }
+        });
       }
     }
-
     // ─── UNDO INTENT ─────────────────────────────────────────────────────────
     // MVP REWRITE 2026-09-21: intentionally not wired up. See the header
     // comment block for why (restore-version restores a generated_itineraries
@@ -399,82 +541,69 @@ serve(async (req) => {
       return new Response(JSON.stringify({
         status: "info",
         action: "undo_unsupported",
-        response_message: "Undo isn't available yet for changes made this way — it's on the list, just not built. I can make the specific changes back for you if you tell me what to restore, or you can say \"show version history\" to see what changed.",
-      }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        response_message: "Undo isn't available yet for changes made this way — it's on the list, just not built. I can make the specific changes back for you if you tell me what to restore, or you can say \"show version history\" to see what changed."
+      }), {
+        headers: {
+          ...CORS_HEADERS,
+          "Content-Type": "application/json"
+        }
+      });
     }
-
     // ─── HISTORY INTENT ──────────────────────────────────────────────────────
     // Unaffected by the itinerary_items migration — itinerary_versions was
     // already trip_id/uuid-native. This will now return real entries once
     // this function starts writing them (see the versioning section below).
     if (detectHistoryIntent(user_request)) {
-      const { data: versions } = await supabase
-        .from("itinerary_versions")
-        .select("id, version_number, version_name, status, is_active, creation_method, created_at")
-        .eq("trip_id", trip_id)
-        .eq("user_id", user_id)
-        .order("version_number", { ascending: false });
-
-      const versionList = (versions || []).map(v =>
-        `Version ${v.version_number}: "${v.version_name}" (${v.creation_method?.replace(/_/g, " ").toLowerCase()})${v.is_active ? " ← current" : ""}`
-      ).join("\n");
-
+      const { data: versions } = await supabase.from("itinerary_versions").select("id, version_number, version_name, status, is_active, creation_method, created_at").eq("trip_id", trip_id).eq("user_id", user_id).order("version_number", {
+        ascending: false
+      });
+      const versionList = (versions || []).map((v)=>`Version ${v.version_number}: "${v.version_name}" (${v.creation_method?.replace(/_/g, " ").toLowerCase()})${v.is_active ? " ← current" : ""}`).join("\n");
       return new Response(JSON.stringify({
         status: "info",
         action: "version_history",
         versions: versions || [],
-        response_message: versions && versions.length > 0
-          ? `Here are your itinerary versions:\n\n${versionList}`
-          : "No version history found for this trip yet.",
-      }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        response_message: versions && versions.length > 0 ? `Here are your itinerary versions:\n\n${versionList}` : "No version history found for this trip yet."
+      }), {
+        headers: {
+          ...CORS_HEADERS,
+          "Content-Type": "application/json"
+        }
+      });
     }
-
     // ─── LOAD CURRENT ITEMS (replaces reading generated_itineraries.itinerary) ──
-    const { data: itemRows, error: itemsErr } = await supabase
-      .from("itinerary_items")
-      .select("id, title, type, category, status, date, start_time, end_time, location, notes, fixed, outdoor, must_do, starred, critical, droppable, suggested")
-      .eq("trip_id", trip_id)
-      .order("date", { ascending: true })
-      .order("start_time", { ascending: true });
+    const { data: itemRows, error: itemsErr } = await supabase.from("itinerary_items").select("id, title, type, category, status, date, start_time, end_time, location, notes, fixed, outdoor, must_do, starred, critical, droppable, suggested").eq("trip_id", trip_id).order("date", {
+      ascending: true
+    }).order("start_time", {
+      ascending: true
+    });
     if (itemsErr) console.error("[change-plan] itinerary_items read failed:", itemsErr.message);
     const allItems = itemRows || [];
-    const currentItemIds = new Set(allItems.map((it: any) => it.id));
-
+    const currentItemIds = new Set(allItems.map((it)=>it.id));
     // ─── HEALTH QUERY INTENT ─────────────────────────────────────────────────
     // Adapted from `.eq("itinerary_id", itinerary_id)` to `.eq("trip_id", trip_id)`
     // — trip_health_analyses has both columns; itinerary_id is the legacy one.
     if (detectHealthQueryIntent(user_request)) {
       let healthContext = "";
       try {
-        const { data: healthAnalysis } = await supabase
-          .from("trip_health_analyses")
-          .select("health_score, health_status, issues, overall_assessment, top_issue_title, top_issue_severity, daily_friction")
-          .eq("trip_id", trip_id)
-          .eq("status", "ready")
-          .order("analyzed_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
+        const { data: healthAnalysis } = await supabase.from("trip_health_analyses").select("health_score, health_status, issues, overall_assessment, top_issue_title, top_issue_severity, daily_friction").eq("trip_id", trip_id).eq("status", "ready").order("analyzed_at", {
+          ascending: false
+        }).limit(1).maybeSingle();
         if (healthAnalysis) {
-          const issues = (healthAnalysis.issues as Array<Record<string, unknown>>) || [];
-          const topIssues = issues
-            .filter(i => i.severity === "CRITICAL" || i.severity === "HIGH" || i.severity === "MEDIUM")
-            .slice(0, 5);
-
+          const issues = healthAnalysis.issues || [];
+          const topIssues = issues.filter((i)=>i.severity === "CRITICAL" || i.severity === "HIGH" || i.severity === "MEDIUM").slice(0, 5);
           healthContext = `
 
 TRIP HEALTH CONTEXT (current health score: ${healthAnalysis.health_score}/100, status: ${healthAnalysis.health_status}):
 Overall assessment: ${healthAnalysis.overall_assessment || "Not available"}
 
 Top issues to address:
-${topIssues.map((issue, i) => `${i + 1}. [${issue.severity}] ${issue.title}: ${issue.description}\n   Recommended action: ${issue.recommended_action}`).join("\n") || "No significant issues found."}
+${topIssues.map((issue, i)=>`${i + 1}. [${issue.severity}] ${issue.title}: ${issue.description}\n   Recommended action: ${issue.recommended_action}`).join("\n") || "No significant issues found."}
 
 The user is asking about trip health issues. Use this context to give a specific, actionable response about what to fix.`;
         }
       } catch (e) {
         console.error("[change-plan] Health context fetch failed (non-fatal):", e);
       }
-
       const destinationLabel = tripRow.destination || tripRow.title || "Unknown";
       const healthQueryMsg = `TRIP CONTEXT:
 - Destination: ${destinationLabel}
@@ -484,67 +613,65 @@ ${healthContext}
 USER REQUEST: "${user_request}"
 
 Respond helpfully about the trip health issues. Be specific, actionable, and friendly. If there are issues, explain the top 2-3 most important ones and suggest concrete fixes. If the trip looks good, say so. Keep response to 3-5 sentences.`;
-
       const healthResp = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
           "Content-Type": "application/json",
           "HTTP-Referer": "https://travelos.app",
-          "X-Title": "TravelOS",
+          "X-Title": "TravelOS"
         },
         body: JSON.stringify({
           model: "google/gemini-3.5-flash",
           messages: [
-            { role: "system", content: "You are a helpful travel planning assistant. Give concise, actionable advice about trip health issues." },
-            { role: "user", content: healthQueryMsg },
+            {
+              role: "system",
+              content: "You are a helpful travel planning assistant. Give concise, actionable advice about trip health issues."
+            },
+            {
+              role: "user",
+              content: healthQueryMsg
+            }
           ],
           temperature: 0.3,
-          max_tokens: 500,
-        }),
+          max_tokens: 500
+        })
       });
-
       const healthRespData = await healthResp.json();
       const healthResponseMessage = healthRespData.choices?.[0]?.message?.content || "I couldn't retrieve your trip health details right now. Try running a health analysis first.";
-
       return new Response(JSON.stringify({
         status: "info",
         action: "health_query",
-        response_message: healthResponseMessage,
-      }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        response_message: healthResponseMessage
+      }), {
+        headers: {
+          ...CORS_HEADERS,
+          "Content-Type": "application/json"
+        }
+      });
     }
-
     // ─── DAY FRICTION INTENT ─────────────────────────────────────────────────
     const frictionIntent = detectDayFrictionIntent(user_request);
-
     let frictionContext = "";
     if (frictionIntent.detected && frictionIntent.dayNumber !== null) {
       try {
-        const { data: healthAnalysis } = await supabase
-          .from("trip_health_analyses")
-          .select("daily_friction, issues")
-          .eq("trip_id", trip_id)
-          .eq("status", "ready")
-          .order("analyzed_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
+        const { data: healthAnalysis } = await supabase.from("trip_health_analyses").select("daily_friction, issues").eq("trip_id", trip_id).eq("status", "ready").order("analyzed_at", {
+          ascending: false
+        }).limit(1).maybeSingle();
         if (healthAnalysis) {
-          const dailyFriction = (healthAnalysis.daily_friction as Array<Record<string, unknown>>) || [];
-          const dayFriction = dailyFriction.find(d => d.day_number === frictionIntent.dayNumber);
-          const dayIssues = ((healthAnalysis.issues as Array<Record<string, unknown>>) || [])
-            .filter(i => Array.isArray(i.affected_days) && (i.affected_days as number[]).includes(frictionIntent.dayNumber!));
-
+          const dailyFriction = healthAnalysis.daily_friction || [];
+          const dayFriction = dailyFriction.find((d)=>d.day_number === frictionIntent.dayNumber);
+          const dayIssues = (healthAnalysis.issues || []).filter((i)=>Array.isArray(i.affected_days) && i.affected_days.includes(frictionIntent.dayNumber));
           if (dayFriction || dayIssues.length > 0) {
             frictionContext = `
 
 HEALTH CONTEXT FOR DAY ${frictionIntent.dayNumber}:
 Friction score: ${dayFriction?.friction_score ?? "unknown"}/100 (${dayFriction?.friction_label ?? "unknown"})
 Primary issue: ${dayFriction?.primary_issue ?? "none identified"}
-Friction factors: ${Array.isArray(dayFriction?.factors) ? (dayFriction.factors as string[]).join("; ") : "none"}
+Friction factors: ${Array.isArray(dayFriction?.factors) ? dayFriction.factors.join("; ") : "none"}
 
 Issues affecting this day:
-${dayIssues.map(i => `- [${i.severity}] ${i.title}: ${i.recommended_action}`).join("\n") || "No specific issues found for this day."}
+${dayIssues.map((i)=>`- [${i.severity}] ${i.title}: ${i.recommended_action}`).join("\n") || "No specific issues found for this day."}
 
 Use this context to make targeted improvements to Day ${frictionIntent.dayNumber}.`;
           }
@@ -553,30 +680,30 @@ Use this context to make targeted improvements to Day ${frictionIntent.dayNumber
         console.error("[change-plan] Day friction context fetch failed (non-fatal):", e);
       }
     }
-
     // ─── TRIP CONTEXT (replaces reading the generated_itineraries jsonb blob) ──
     // MVP REWRITE 2026-09-21: the old "preferences" block (travel_style, pace,
     // walking_tolerance_minutes, must_do, avoid, budget, interests) is dropped
     // — nothing in the real schema stores any of it.
     const destinationLabel = tripRow.destination || tripRow.title || "Unknown";
-    const itemsForPrompt = allItems.map((it: any) => ({
-      id: it.id,
-      day_number: dayNumberFor(it.date, tripRow.start_date),
-      date: it.date,
-      start_time: it.start_time,
-      end_time: it.end_time,
-      title: it.title,
-      type: it.type,
-      category: it.category,
-      location: it.location,
-      notes: it.notes,
-      fixed: it.fixed,
-      must_do: it.must_do,
-      starred: it.starred,
-      critical: it.critical,
-    }));
-
+    const tripTz = validTz(tripRow.primary_tz);
+    const itemsForPrompt = allItems.map((it)=>({
+        id: it.id,
+        day_number: dayNumberFor(it.date, tripRow.start_date),
+        date: it.date,
+        start_time: toLocalIso(it.start_time, tripTz),
+        end_time: toLocalIso(it.end_time, tripTz),
+        title: it.title,
+        type: it.type,
+        category: it.category,
+        location: it.location,
+        notes: it.notes,
+        fixed: it.fixed,
+        must_do: it.must_do,
+        starred: it.starred,
+        critical: it.critical
+      }));
     const tripContext = `TRIP CONTEXT:
+- ${timeRule(tripTz)}
 - Destination: ${destinationLabel}
 - Trip dates: ${tripRow.start_date || "unknown"} to ${tripRow.end_date || "unknown"}
 - Item count: ${itemsForPrompt.length}
@@ -584,10 +711,8 @@ ${frictionContext}
 
 CURRENT ITEMS:
 ${JSON.stringify(itemsForPrompt, null, 2)}`;
-
     // ─── PASS 1: INTERPRET ─────────────────────────────────────────────────
-    let interpretation: Record<string, unknown>;
-
+    let interpretation;
     if (confirmed && proposed_changes) {
       interpretation = {
         understood_request: user_request,
@@ -595,59 +720,93 @@ ${JSON.stringify(itemsForPrompt, null, 2)}`;
         requires_clarification: false,
         is_safe_to_apply_directly: true,
         conflicts_with_confirmed: false,
-        proposed_changes: Array.isArray(proposed_changes) ? proposed_changes : [proposed_changes],
+        proposed_changes: Array.isArray(proposed_changes) ? proposed_changes : [
+          proposed_changes
+        ],
         trade_offs: [],
         response_message: "Applying your changes now...",
-        preview_required: false,
+        preview_required: false
       };
     } else {
-      const conversationContext = conversation_history.length > 0
-        ? `\nCONVERSATION HISTORY:\n${conversation_history.map((m: Record<string, string>) => `${m.role.toUpperCase()}: ${m.content}`).join("\n")}\n`
-        : "";
-
+      const conversationContext = conversation_history.length > 0 ? `\nCONVERSATION HISTORY:\n${conversation_history.map((m)=>`${m.role.toUpperCase()}: ${m.content}`).join("\n")}\n` : "";
       const interpretMsg = `${tripContext}${conversationContext}
 
 USER REQUEST: "${user_request}"
 
 Interpret this request. Identify what changes to make, check for conflicts with fixed or must-do items, and determine if clarification is needed.`;
-
       const pass1Resp = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
         method: "POST",
-        headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json", "HTTP-Referer": "https://travelos.app", "X-Title": "TravelOS" },
-        body: JSON.stringify({ model: "google/gemini-3.5-flash", messages: [{ role: "system", content: INTERPRET_PROMPT }, { role: "user", content: interpretMsg }], response_format: { type: "json_object" }, temperature: 0.2, max_tokens: 3000 }),
+        headers: {
+          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://travelos.app",
+          "X-Title": "TravelOS"
+        },
+        body: JSON.stringify({
+          model: "google/gemini-3.5-flash",
+          messages: [
+            {
+              role: "system",
+              content: INTERPRET_PROMPT
+            },
+            {
+              role: "user",
+              content: interpretMsg
+            }
+          ],
+          response_format: {
+            type: "json_object"
+          },
+          temperature: 0.2,
+          max_tokens: 3000
+        })
       });
       if (!pass1Resp.ok) throw new Error(`Interpret error: ${await pass1Resp.text()}`);
       const pass1Data = await pass1Resp.json();
-      try { interpretation = JSON.parse(pass1Data.choices?.[0]?.message?.content); }
-      catch { throw new Error("Failed to parse interpretation response"); }
+      try {
+        interpretation = JSON.parse(pass1Data.choices?.[0]?.message?.content);
+      } catch  {
+        throw new Error("Failed to parse interpretation response");
+      }
     }
-
     // If clarification needed, return early
     if (interpretation.requires_clarification && !confirmed) {
       await supabase.from("plan_changes").insert({
-        trip_id, itinerary_id: null, user_id,
-        user_request, conversation_history,
-        interpretation, status: "needs_clarification",
+        trip_id,
+        itinerary_id: null,
+        user_id,
+        user_request,
+        conversation_history,
+        interpretation,
+        status: "needs_clarification",
         requires_clarification: true,
         clarification_question: interpretation.clarification_question,
-        response_message: interpretation.clarification_question,
+        response_message: interpretation.clarification_question
       });
       return new Response(JSON.stringify({
         status: "needs_clarification",
         clarification_question: interpretation.clarification_question,
         understood_request: interpretation.understood_request,
-        response_message: interpretation.clarification_question,
-      }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        response_message: interpretation.clarification_question
+      }), {
+        headers: {
+          ...CORS_HEADERS,
+          "Content-Type": "application/json"
+        }
+      });
     }
-
     // If preview required and not yet confirmed, return proposed changes for preview
     if (interpretation.preview_required && !confirmed) {
       await supabase.from("plan_changes").insert({
-        trip_id, itinerary_id: null, user_id,
-        user_request, conversation_history,
-        interpretation, proposed_changes: interpretation.proposed_changes,
+        trip_id,
+        itinerary_id: null,
+        user_id,
+        user_request,
+        conversation_history,
+        interpretation,
+        proposed_changes: interpretation.proposed_changes,
         status: "awaiting_confirmation",
-        response_message: interpretation.response_message,
+        response_message: interpretation.response_message
       });
       return new Response(JSON.stringify({
         status: "preview",
@@ -656,10 +815,14 @@ Interpret this request. Identify what changes to make, check for conflicts with 
         trade_offs: interpretation.trade_offs,
         response_message: interpretation.response_message,
         conflicts_with_confirmed: interpretation.conflicts_with_confirmed,
-        conflict_explanation: interpretation.conflict_explanation,
-      }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        conflict_explanation: interpretation.conflict_explanation
+      }), {
+        headers: {
+          ...CORS_HEADERS,
+          "Content-Type": "application/json"
+        }
+      });
     }
-
     // ─── PASS 2: APPLY ─────────────────────────────────────────────────────
     const applyMsg = `${tripContext}
 
@@ -669,34 +832,61 @@ ${JSON.stringify(interpretation.proposed_changes, null, 2)}
 USER REQUEST: "${user_request}"
 
 Apply these changes by producing create/update/delete operations against the item list. Protect fixed and must-do items.`;
-
     const pass2Resp = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
       method: "POST",
-      headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json", "HTTP-Referer": "https://travelos.app", "X-Title": "TravelOS" },
-      body: JSON.stringify({ model: "google/gemini-3.5-flash", messages: [{ role: "system", content: APPLY_PROMPT }, { role: "user", content: applyMsg }], response_format: { type: "json_object" }, temperature: 0.2, max_tokens: 8000 }),
+      headers: {
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://travelos.app",
+        "X-Title": "TravelOS"
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3.5-flash",
+        messages: [
+          {
+            role: "system",
+            content: APPLY_PROMPT
+          },
+          {
+            role: "user",
+            content: applyMsg
+          }
+        ],
+        response_format: {
+          type: "json_object"
+        },
+        temperature: 0.2,
+        max_tokens: 8000
+      })
     });
     if (!pass2Resp.ok) throw new Error(`Apply error: ${await pass2Resp.text()}`);
     const pass2Data = await pass2Resp.json();
-    let applyResult: Record<string, unknown>;
-    try { applyResult = JSON.parse(pass2Data.choices?.[0]?.message?.content); }
-    catch { throw new Error("Failed to parse apply response"); }
-
-    const operations = (applyResult.operations as Array<Record<string, unknown>>) || [];
-    const appliedChanges = (applyResult.applied_changes as Array<Record<string, unknown>>) || [];
-    const failedChanges: Array<Record<string, unknown>> = [...((applyResult.failed_changes as Array<Record<string, unknown>>) || [])];
-
+    let applyResult;
+    try {
+      applyResult = JSON.parse(pass2Data.choices?.[0]?.message?.content);
+    } catch  {
+      throw new Error("Failed to parse apply response");
+    }
+    const operations = applyResult.operations || [];
+    const appliedChanges = applyResult.applied_changes || [];
+    const failedChanges = [
+      ...applyResult.failed_changes || []
+    ];
     // ─── EXECUTE OPERATIONS AGAINST itinerary_items ─────────────────────────
     // MVP REWRITE 2026-09-21: direct row-level CRUD, scoped to trip_id on
     // every statement, through the ITEM_WRITABLE_FIELDS whitelist above.
     let appliedOpCount = 0;
-    for (const rawOp of operations) {
-      const op = rawOp.op as string;
-      const itemId = (rawOp.item_id as string) || null;
-      const fields = sanitizeItemFields(rawOp.fields as Record<string, unknown>);
+    for (const rawOp of operations){
+      const op = rawOp.op;
+      const itemId = rawOp.item_id || null;
+      const fields = sanitizeItemFields(rawOp.fields);
       try {
         if (op === "create") {
           if (!fields.title || !fields.date) throw new Error("create requires at least title and date");
-          const { error } = await supabase.from("itinerary_items").insert({ trip_id, ...fields });
+          const { error } = await supabase.from("itinerary_items").insert({
+            trip_id,
+            ...fields
+          });
           if (error) throw error;
           appliedOpCount++;
         } else if (op === "update") {
@@ -715,77 +905,59 @@ Apply these changes by producing create/update/delete operations against the ite
       } catch (e) {
         failedChanges.push({
           change_id: itemId || "unknown",
-          reason: e instanceof Error ? e.message : String(e),
+          reason: e instanceof Error ? e.message : String(e)
         });
       }
     }
-
-    let newVersionId: string | null = null;
-    let versionError: string | null = null;
-
+    let newVersionId = null;
+    let versionError = null;
+    let previousVersionIdOut = null;
     if (appliedOpCount > 0) {
       // ─── VERSIONING ────────────────────────────────────────────────────────
       // MVP REWRITE 2026-09-21: INSERT itinerary_versions directly, with a
       // full flat snapshot of itinerary_items taken AFTER the writes above,
       // instead of calling create-itinerary-version (which still expects a
       // generated_itineraries-shaped itinerary_id and was not touched here).
-      const { data: lastVersionRows } = await supabase
-        .from("itinerary_versions")
-        .select("version_number")
-        .eq("trip_id", trip_id)
-        .order("version_number", { ascending: false })
-        .limit(1);
+      const { data: lastVersionRows } = await supabase.from("itinerary_versions").select("version_number").eq("trip_id", trip_id).order("version_number", {
+        ascending: false
+      }).limit(1);
       const nextVersionNumber = lastVersionRows?.[0]?.version_number ? lastVersionRows[0].version_number + 1 : 1;
-
-      const { data: activeVersionRow } = await supabase
-        .from("itinerary_versions")
-        .select("id")
-        .eq("trip_id", trip_id)
-        .eq("is_active", true)
-        .maybeSingle();
+      const { data: activeVersionRow } = await supabase.from("itinerary_versions").select("id").eq("trip_id", trip_id).eq("is_active", true).maybeSingle();
       const previousVersionId = activeVersionRow?.id ?? null;
-
+      previousVersionIdOut = previousVersionId;
       if (previousVersionId) {
-        await supabase.from("itinerary_versions").update({ is_active: false }).eq("id", previousVersionId);
+        await supabase.from("itinerary_versions").update({
+          is_active: false
+        }).eq("id", previousVersionId);
       }
-
-      const { data: snapshotItems } = await supabase
-        .from("itinerary_items")
-        .select("*")
-        .eq("trip_id", trip_id)
-        .order("date", { ascending: true })
-        .order("start_time", { ascending: true });
-
+      const { data: snapshotItems } = await supabase.from("itinerary_items").select("*").eq("trip_id", trip_id).order("date", {
+        ascending: true
+      }).order("start_time", {
+        ascending: true
+      });
       const creationMethod = alert_id ? "ALERT_FIX" : "CONVERSATIONAL_CHANGE";
-      const changeSummaryBullets: string[] = requestChangeSummary
-        ? [requestChangeSummary]
-        : ((applyResult.change_summary as Record<string, unknown>)?.bullets as string[] ||
-           appliedChanges.map(c => (c.description as string) || (c.type as string)).filter(Boolean));
-
+      const changeSummaryBullets = requestChangeSummary ? [
+        requestChangeSummary
+      ] : applyResult.change_summary?.bullets || appliedChanges.map((c)=>c.description || c.type).filter(Boolean);
       try {
-        const { data: newVersionRow, error: versionInsertErr } = await supabase
-          .from("itinerary_versions")
-          .insert({
-            trip_id,
-            user_id,
-            version_number: nextVersionNumber,
-            parent_version_id: previousVersionId,
-            is_active: true,
-            status: "ready",
-            creation_method: creationMethod,
-            version_name: generateVersionName(user_request),
-            user_request,
-            change_summary: changeSummaryBullets.slice(0, 5),
-            itinerary_snapshot: snapshotItems || [],
-            alert_id: alert_id || null,
-            monitoring_event_id: monitoring_event_id || null,
-            proposal_id: proposal_id || null,
-            impact_id: impact_id || null,
-            change_request: user_request,
-          })
-          .select("id")
-          .single();
-
+        const { data: newVersionRow, error: versionInsertErr } = await supabase.from("itinerary_versions").insert({
+          trip_id,
+          user_id,
+          version_number: nextVersionNumber,
+          parent_version_id: previousVersionId,
+          is_active: true,
+          status: "ready",
+          creation_method: creationMethod,
+          version_name: generateVersionName(user_request),
+          user_request,
+          change_summary: changeSummaryBullets.slice(0, 5),
+          itinerary_snapshot: snapshotItems || [],
+          alert_id: alert_id || null,
+          monitoring_event_id: monitoring_event_id || null,
+          proposal_id: proposal_id || null,
+          impact_id: impact_id || null,
+          change_request: user_request
+        }).select("id").single();
         if (versionInsertErr) throw versionInsertErr;
         newVersionId = newVersionRow.id;
       } catch (e) {
@@ -794,58 +966,69 @@ Apply these changes by producing create/update/delete operations against the ite
         // The item writes above already happened — don't leave the trip with
         // no active version because the snapshot insert failed.
         if (previousVersionId) {
-          await supabase.from("itinerary_versions").update({ is_active: true }).eq("id", previousVersionId);
+          await supabase.from("itinerary_versions").update({
+            is_active: true
+          }).eq("id", previousVersionId);
         }
       }
-
       // ─── POST-VERSION: Update copilot_proposals if proposal_id provided ────
       // Unchanged — only ever needed newVersionId + proposal_id.
       if (proposal_id && newVersionId) {
         try {
-          const changeSummaryText = requestChangeSummary ||
-            ((applyResult.change_summary as Record<string, unknown>)?.headline as string) ||
-            `Applied: ${user_request}`;
-          await supabase
-            .from("copilot_proposals")
-            .update({
-              result_itinerary_version_id: newVersionId,
-              result_version_change_summary: changeSummaryText,
-              status: "COMPLETE",
-              executed_at: new Date().toISOString(),
-            })
-            .eq("id", proposal_id);
+          const changeSummaryText = requestChangeSummary || applyResult.change_summary?.headline || `Applied: ${user_request}`;
+          await supabase.from("copilot_proposals").update({
+            result_itinerary_version_id: newVersionId,
+            result_version_change_summary: changeSummaryText,
+            status: "COMPLETE",
+            executed_at: new Date().toISOString()
+          }).eq("id", proposal_id);
         } catch (e) {
           console.error("[change-plan] Failed to update copilot_proposals (non-fatal):", e);
         }
       }
-
       // ─── POST-VERSION: Update travel_alerts if alert_id + proposal_id ──────
       if (alert_id && proposal_id) {
         try {
-          await supabase
-            .from("travel_alerts")
-            .update({ copilot_proposal_id: proposal_id })
-            .eq("id", alert_id);
+          await supabase.from("travel_alerts").update({
+            copilot_proposal_id: proposal_id
+          }).eq("id", alert_id);
         } catch (e) {
           console.error("[change-plan] Failed to update travel_alerts (non-fatal):", e);
         }
       }
-
-      // ─── ISSUE LIFECYCLE ─────────────────────────────────────────────────
-      // MVP REWRITE 2026-09-21: adapted from `.eq("itinerary_id", oldItineraryId)`
-      // to `.eq("trip_id", trip_id)` — trip_issues.trip_id is a NOT NULL uuid
-      // column, confirmed against the live schema.
+      // ─── TRIP VERSION BUMP (ITINERARY RECONCILIATION 2026-09-24) ─────────
+      // itinerary_items were written, so bump trips.version for replan-engine's
+      // optimistic check. supabase-js cannot express `version = version + 1`,
+      // so this is a compare-and-swap with a few retries. Never fatal.
       try {
-        await supabase
-          .from("trip_issues")
-          .update({ status: "RESOLVED", updated_at: new Date().toISOString() })
-          .eq("trip_id", trip_id)
-          .in("status", ["OPEN", "ACKNOWLEDGED"]);
+        let bumped = false;
+        for(let attempt = 0; attempt < 3 && !bumped; attempt++){
+          const { data: vRow, error: vReadErr } = await supabase.from("trips").select("version").eq("id", trip_id).maybeSingle();
+          if (vReadErr) throw vReadErr;
+          if (!vRow) throw new Error("trip row not found for version bump");
+          const cur = Number(vRow.version) || 0;
+          const { data: upd, error: vUpdErr } = await supabase.from("trips").update({
+            version: cur + 1
+          }).eq("id", trip_id).eq("version", vRow.version).select("id");
+          if (vUpdErr) throw vUpdErr;
+          bumped = Array.isArray(upd) && upd.length > 0;
+        }
+        if (!bumped) console.error("[change-plan] trips.version bump lost 3 races (non-fatal)");
       } catch (e) {
-        console.error("[change-plan] Failed to resolve old issues (non-fatal):", e);
+        console.error("[change-plan] trips.version bump failed (non-fatal):", e);
+      }
+      // ─── ISSUE LIFECYCLE (2026-09-25) ────────────────────────────────────
+      // No blanket RESOLVED update any more (see header). Re-detect against the
+      // new version; detect-trip-issues resolves only issues it no longer sees.
+      if (newVersionId) {
+        backgroundCall("detect-trip-issues", "detect-trip-issues", {
+          trip_id,
+          version_id: newVersionId,
+          user_id,
+          force_refresh: true
+        });
       }
     }
-
     // Save to plan_changes (audit row). itinerary_id / previous_itinerary_id
     // are always null now — see point 11 in the header comment.
     await supabase.from("plan_changes").insert({
@@ -860,12 +1043,12 @@ Apply these changes by producing create/update/delete operations against the ite
       applied_changes: appliedChanges,
       status: appliedOpCount > 0 ? "applied" : "no_changes",
       response_message: applyResult.response_message,
-      change_summary: applyResult.change_summary,
+      change_summary: applyResult.change_summary
     });
-
     return new Response(JSON.stringify({
       status: appliedOpCount > 0 ? "applied" : "no_changes",
       new_version_id: newVersionId,
+      previous_version_id: previousVersionIdOut,
       version_error: versionError,
       applied_changes: appliedChanges,
       failed_changes: failedChanges,
@@ -877,14 +1060,24 @@ Apply these changes by producing create/update/delete operations against the ite
       // itinerary_id, which this function no longer creates.
       revalidation_triggered: false,
       health_recalculating: false,
-      pipeline_note: appliedOpCount > 0
-        ? "validate-itinerary / post-activation-recalculate / detect-trip-issues are not wired up for itinerary_items yet."
-        : null,
-    }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
-
+      pipeline_note: appliedOpCount > 0 ? "validate-itinerary / post-activation-recalculate / detect-trip-issues are not wired up for itinerary_items yet." : null
+    }), {
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/json"
+      }
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[change-plan] Error:", msg);
-    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({
+      error: "Internal server error"
+    }), {
+      status: 500,
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/json"
+      }
+    });
   }
 });

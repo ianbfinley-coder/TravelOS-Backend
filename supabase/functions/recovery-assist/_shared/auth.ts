@@ -1,14 +1,7 @@
-// TravelOS — shared edge function authentication.
-//
-// Created 2026-09-16 after an audit found 36 of 46 functions with an
-// authentication or authorization defect. The root cause was that every
-// function improvised its own gate, or skipped one: `verify_jwt: false` means
-// Supabase does NOT authenticate the caller, and most functions then built a
-// service_role client, which bypasses RLS. Neither layer was protecting the
-// other.
-//
-// Use this instead of writing a new gate. Deploy it alongside a function as
-// `_shared/auth.ts` and import with `./_shared/auth.ts`.
+// TravelOS shared edge function authentication.
+// Never build a service client passing the caller's JWT as Authorization -
+// PostgREST takes the role from that header, so it runs as `authenticated`,
+// not `service_role`, and RLS applies. Use serviceClient() below instead.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 export const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 export const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY');
@@ -32,7 +25,7 @@ export function fail(message, status = 400) {
     error: message
   }, status);
 }
-/** Service-role client. Bypasses RLS — only for operations that must cross a tenant boundary. */ export function serviceClient() {
+/** Service-role client. Bypasses RLS - only for operations that must cross a tenant boundary. */ export function serviceClient() {
   return createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 }
 /** Length-independent constant-time compare, for secret material. */ export function timingSafeEqual(a, b) {
@@ -52,13 +45,7 @@ function bearer(req) {
 }
 /**
  * Verifies the caller's JWT and returns their auth.uid().
- *
- * NEVER accept an identity from the request body. Seven functions in this
- * codebase did, which let any caller act as any user.
- *
- * Note the deliberate rejection of a bare presence check: seven other functions
- * used `if (!authHeader) return 401`, which `Authorization: x` passes because
- * the token is never decoded.
+ * NEVER accept an identity from the request body.
  */ export async function requireUser(req) {
   const token = bearer(req);
   if (!token) return fail('Missing or invalid Authorization header', 401);
@@ -102,22 +89,17 @@ function bearer(req) {
  * auth.uid() directly. Returns 404 rather than 403 so a caller cannot probe
  * which trip ids exist.
  */ export async function requireTripOwner(service, tripId, userId) {
-  const { data } = await service.from('trips').select('id').eq('id', tripId).eq('user_id', userId).maybeSingle();
+  const { data, error } = await service.from('trips').select('id').eq('id', tripId).eq('user_id', userId).maybeSingle();
+  if (error) console.error('[auth] trips ownership lookup failed:', error.message);
   if (!data) return fail('Trip not found', 404);
   return true;
 }
 /**
  * Bridges Supabase auth to the platform identity space.
- *
- * TravelOS runs two id systems: Supabase uuids (auth.uid(), trips, profiles)
- * and prefixed text ids (platform_users, platform_trips, trip_members).
- * `auth_identities.provider_subject` holds auth.uid() as text.
- *
- * Match on provider_subject ALONE. The `provider` column is
- * `app_metadata.provider || 'email_link'`, so it varies by sign-in method and
- * filtering on a fixed value matches nothing — a check that looks secure and
- * silently denies everyone.
+ * Match on provider_subject ALONE - the `provider` column varies by
+ * sign-in method, so filtering on a fixed value matches nothing.
  */ export async function resolvePlatformUserId(service, authUserId) {
-  const { data } = await service.from('auth_identities').select('user_id').eq('provider_subject', authUserId).maybeSingle();
+  const { data, error } = await service.from('auth_identities').select('user_id').eq('provider_subject', authUserId).maybeSingle();
+  if (error) console.error('[auth] auth_identities lookup failed:', error.message);
   return data?.user_id ?? null;
 }

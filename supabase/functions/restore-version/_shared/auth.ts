@@ -102,7 +102,8 @@ function bearer(req) {
  * auth.uid() directly. Returns 404 rather than 403 so a caller cannot probe
  * which trip ids exist.
  */ export async function requireTripOwner(service, tripId, userId) {
-  const { data } = await service.from('trips').select('id').eq('id', tripId).eq('user_id', userId).maybeSingle();
+  const { data, error } = await service.from('trips').select('id').eq('id', tripId).eq('user_id', userId).maybeSingle();
+  if (error) console.error('[auth] trips ownership lookup failed:', error.message);
   if (!data) return fail('Trip not found', 404);
   return true;
 }
@@ -118,6 +119,7 @@ function bearer(req) {
  * filtering on a fixed value matches nothing — a check that looks secure and
  * silently denies everyone.
  */ export async function resolvePlatformUserId(service, authUserId) {
-  const { data } = await service.from('auth_identities').select('user_id').eq('provider_subject', authUserId).maybeSingle();
+  const { data, error } = await service.from('auth_identities').select('user_id').eq('provider_subject', authUserId).maybeSingle();
+  if (error) console.error('[auth] auth_identities lookup failed:', error.message);
   return data?.user_id ?? null;
 }
