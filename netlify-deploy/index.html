@@ -2214,12 +2214,9 @@
   // 'HH:MM' times in the trip's time zone and work out start_time/end_time
   // themselves. They don't take country code, outdoors or fixed time, so
   // when one of those changes it's written to the item right after the
-  // versioned save.
-  // REMOVED 2026-09-25: the unversioned fallback. All five itinerary_* RPCs
-  // are deployed and executable by `authenticated`, so the 404/PGRST202
-  // branch was unreachable. Had it ever fired it would have written straight
-  // to itinerary_items, silently bypassing the version log that History and
-  // Undo depend on -- with no error shown. A visible failure is correct here.
+  // versioned save. CHANGED 2026-09-26: the old unversioned fallback (a
+  // direct itinerary_items write when an RPC returned 404) is gone, so a
+  // spurious 404 now shows an error instead of silently skipping History.
   var itTimer = { t: null };
   function hhmm(v) { return v ? String(v).slice(0, 5) : null; }
   function itemMsg(r, verb) {
