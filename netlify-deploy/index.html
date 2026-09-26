@@ -1907,6 +1907,24 @@
     list.innerHTML = reservations.map(function (x) {
       var conf = x.confidence === "HIGH" ? "ok" : (x.confidence === "LOW" ? "bad" : "warn");
       var comp = x.data_completeness === "COMPLETE" ? "ok" : (x.data_completeness === "INCOMPLETE" ? "bad" : "warn");
+      // SHARED WITH THE TRIP 2026-09-26: everyone on the trip sees every
+      // booking; other people's private details (confirmation number,
+      // address, notes...) arrive stripped unless shared. Older responses
+      // have none of these flags, so they default to "mine".
+      var mine = x.is_mine !== false, hidden = x.details_hidden === true;
+      var canEdit = x.can_edit !== false, canShare = x.can_change_sharing === true;
+      var sharing = "";
+      if (hidden) {
+        sharing = '<p class="note tiny" style="margin:10px 0 0">The confirmation number and other details are private to '
+          + esc(x.booked_by || "the person who booked it") + "."
+          + (canShare ? "" : " They or an organizer can share them with the trip.") + "</p>";
+      } else if (!mine) {
+        sharing = '<p class="note tiny" style="margin:10px 0 0">' + esc(x.booked_by || "The person who booked it") + " shared these details with the trip.</p>";
+      } else if (x.share_details) {
+        sharing = '<p class="note tiny" style="margin:10px 0 0">Everyone on this trip can see these details.</p>';
+      } else if (x.is_mine === true) {
+        sharing = '<p class="note tiny" style="margin:10px 0 0">Others on this trip see this booking, but not its confirmation number or other details.</p>';
+      }
       return '<div class="res">'
         + '<div class="top"><div class="name">' + esc(x.provider_name || x.location_name || "(no provider)") + "</div>"
         + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
@@ -1914,19 +1932,23 @@
         + '<span class="chip ' + (x.reservation_status === "CONFIRMED" ? "ok" : "mute") + '">' + esc(x.reservation_status) + "</span>"
         + '<span class="chip ' + conf + '">confidence ' + esc(x.confidence) + "</span>"
         + '<span class="chip ' + comp + '">' + esc(x.data_completeness) + "</span>"
+        + (mine ? "" : '<span class="chip acc">Booked by ' + esc(x.booked_by || "someone else") + "</span>")
         + "</div></div>"
         + "<dl>"
         + field("Starts", [x.start_date, x.start_time].filter(Boolean).join(" ") || "—")
         + field("Ends", [x.end_date, x.end_time].filter(Boolean).join(" ") || "—")
-        + field("Confirmation", x.confirmation_number || "—")
+        + field("Confirmation", hidden ? "Private" : (x.confirmation_number || "—"))
         + field("Where", [x.location_name, x.city, x.country].filter(Boolean).join(", ") || "—")
         + "</dl>"
         + (x.needs_review ? '<div class="review"><strong>Worth a second look</strong> &mdash; ' + esc(x.review_reason || "flagged by the server") + "</div>" : "")
         + (x.possible_duplicate_id ? '<div class="review">This might be a duplicate of another reservation.</div>' : "")
         + (x.notes ? '<p class="note" style="margin:10px 0 0">' + esc(x.notes) + "</p>" : "")
+        + sharing
         + '<div class="acts">'
-        + '<button class="ghost tiny" data-act="confirm" data-id="' + esc(x.id) + '" type="button">Mark confirmed</button>'
-        + '<button class="danger tiny" data-act="delete" data-id="' + esc(x.id) + '" type="button">Delete</button>'
+        + (canEdit ? '<button class="ghost tiny" data-act="confirm" data-id="' + esc(x.id) + '" type="button">Mark confirmed</button>' : "")
+        + (canShare ? '<button class="ghost tiny" data-act="share" data-share="' + (x.share_details ? "0" : "1") + '" data-id="' + esc(x.id) + '" type="button">'
+            + (x.share_details ? "Stop sharing details" : "Share details with the trip") + "</button>" : "")
+        + (canEdit ? '<button class="danger tiny" data-act="delete" data-id="' + esc(x.id) + '" type="button">Delete</button>' : "")
         + "</div></div>";
     }).join("")
     + '<p class="note tiny" style="margin:12px 0 0">' + esc(String(payload.total_count))
@@ -1944,7 +1966,18 @@
     var id = btn.getAttribute("data-id");
     btn.disabled = true;
     try {
-      if (btn.getAttribute("data-act") === "delete") {
+      if (btn.getAttribute("data-act") === "share") {
+        var on = btn.getAttribute("data-share") === "1";
+        var sr = await call("POST", "/rest/v1/rpc/set_reservation_sharing", { body: { p_reservation_id: id, p_share: on } });
+        var sc = sr && sr.data && sr.data.code;
+        if (!sr || !sr.ok || !sr.data || sr.data.ok !== true) {
+          showToast(sc === "FORBIDDEN" ? "Only the person who booked it or an organizer can change this."
+            : sc === "MFA_REQUIRED" ? "Finish two-step verification first, then try again."
+            : "Sharing couldn't be changed. Try again in a moment.", null);
+          return;
+        }
+        showToast(on ? "Details shared with everyone on this trip." : "Details are private again.", null);
+      } else if (btn.getAttribute("data-act") === "delete") {
         if (!window.confirm("Delete this reservation?")) { btn.disabled = false; return; }
         await call("DELETE", "/functions/v1/reservations-api", { body: { reservation_id: id } });
       } else {
