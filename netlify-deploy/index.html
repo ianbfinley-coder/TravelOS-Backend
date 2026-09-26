@@ -573,6 +573,7 @@
           <div><label class="f" for="tEnd">Ends</label><input id="tEnd" type="date"></div>
           <div><label class="f" for="tTz">Time zone</label><select id="tTz"></select></div>
           <div><label class="f" for="tStatus">Status</label><input id="tStatus" type="text" placeholder="planning"></div>
+          <div><label class="f" for="tCountry">Country</label><select id="tCountry"><option value="">Automatic (from destination)</option></select></div>
         </div>
         <div class="row" style="margin-top:12px">
           <div class="shrink"><button id="saveTrip" type="submit">Save trip</button></div>
@@ -1722,7 +1723,7 @@
   var selectedTripId = null;
 
   async function loadTrips(selectId) {
-    var r = await call("GET", "/rest/v1/trips?select=id,user_id,name,title,destination,start_date,end_date,status,primary_tz,base_currency&order=start_date.desc");
+    var r = await call("GET", "/rest/v1/trips?select=id,user_id,name,title,destination,start_date,end_date,status,primary_tz,base_currency,country_code,country_source&order=start_date.desc");
     if (!r.ok) { return; }
     trips = r.data || [];
     if (selectId) {
@@ -1779,8 +1780,13 @@
     var t = currentTrip();
     if (!t) return;
     var bits = [t.destination || "No destination set", (t.start_date || "?") + " → " + (t.end_date || "?")];
+    // TRIP COUNTRY (web wave 13): filled in automatically from the
+    // destination, or chosen in Edit trip. Per-country safety, embassy and
+    // emergency information keys on it.
+    bits.push(t.country_code ? countryName(t.country_code) : "Country not set");
     if (t.primary_tz) bits.push(t.primary_tz);
     $("tripMeta").textContent = bits.join("  ·  ");
+    if (!countries.loaded) loadCountries();
     loadReservations();
     loadDerived();
     loadItinerary();
@@ -1798,6 +1804,47 @@
     $("tripForm").hidden = true;
   }
 
+  // ── trip country (web wave 13) ─────────────────────────────
+  // list_countries() -> [{code, name}]; set_trip_country(trip, code|null)
+  // -> { ok, country_code, country_source } or { ok:false, code }. null goes
+  // back to automatic (derived from the destination by the database).
+  var countries = { list: [], byCode: {}, loaded: false };
+  function countryName(code) { return countries.byCode[code] || code; }
+  async function loadCountries() {
+    if (countries.loaded || !session) return;
+    var r = null;
+    try { r = await rpc("list_countries", {}); } catch (e) { r = null; }
+    if (!r || !r.ok || !Array.isArray(r.data)) return;
+    countries.list = r.data;
+    countries.byCode = {};
+    r.data.forEach(function (c) { countries.byCode[c.code] = c.name; });
+    countries.loaded = true;
+    var sel = $("tCountry");
+    sel.innerHTML = '<option value="">Automatic (from destination)</option>'
+      + r.data.map(function (c) { return '<option value="' + esc(c.code) + '">' + esc(c.name) + "</option>"; }).join("");
+    if (currentTrip()) { var tt = currentTrip(); if (tt.country_code) onTripMetaRefresh(); }
+  }
+  function onTripMetaRefresh() {
+    var t = currentTrip();
+    if (!t) return;
+    var bits = [t.destination || "No destination set", (t.start_date || "?") + " → " + (t.end_date || "?")];
+    bits.push(t.country_code ? countryName(t.country_code) : "Country not set");
+    if (t.primary_tz) bits.push(t.primary_tz);
+    $("tripMeta").textContent = bits.join("  ·  ");
+  }
+  var COUNTRY_MSG = {
+    FORBIDDEN: "Only the trip's owner or an organizer can change its country.",
+    MFA_REQUIRED: "Finish two-step verification first, then try again.",
+    BAD_COUNTRY: "That country isn't on the list.",
+    NOT_FOUND: "You're not on this trip anymore."
+  };
+  async function saveTripCountry(tripId, code) {
+    var r = null;
+    try { r = await rpc("set_trip_country", { p_trip_id: tripId, p_country_code: code || null }); } catch (e) { r = null; }
+    if (r && r.ok && r.data && r.data.ok === true) return null;
+    return (r && r.data && COUNTRY_MSG[r.data.code]) || "The country couldn't be saved right now.";
+  }
+
   // ── trip editor ────────────────────────────────────────────
   function openTripEditor(isNew) {
     var t = isNew ? newTripDefaults() : currentTrip();
@@ -1811,6 +1858,12 @@
     $("tEnd").value = t.end_date || "";
     fillTzSelect(t.primary_tz || browserTz());
     $("tStatus").value = t.status || "planning";
+    loadCountries();
+    var autoOpt = $("tCountry").options[0];
+    autoOpt.textContent = t.country_source === "auto" && t.country_code
+      ? "Automatic (" + countryName(t.country_code) + ")" : "Automatic (from destination)";
+    $("tCountry").value = t.country_source === "user" && t.country_code ? t.country_code : "";
+    $("tCountry").dataset.orig = $("tCountry").value;
     $("tripErr").hidden = true;
     f.hidden = false;
     $("tName").focus();
@@ -1863,6 +1916,7 @@
           body: { destination: patch.destination, status: patch.status }
         });
       }
+      if ($("tCountry").value) await saveTripCountry(newId, $("tCountry").value);
       $("saveTrip").disabled = false;
       $("tripForm").hidden = true;
       await loadTrips(newId);
@@ -1877,6 +1931,16 @@
       $("tripErr").textContent = "Could not save the trip. " + (r.detail || ("HTTP " + r.status));
       $("tripErr").hidden = false;
       return;
+    }
+    var pickedCountry = $("tCountry").value;
+    if (pickedCountry !== ($("tCountry").dataset.orig || "")) {
+      var cErr = await saveTripCountry(t.id, pickedCountry);
+      if (cErr) {
+        $("tripErr").textContent = "The trip was saved, but its country wasn't. " + cErr;
+        $("tripErr").hidden = false;
+        await loadTrips();
+        return;
+      }
     }
     $("tripForm").hidden = true;
     await loadTrips();
