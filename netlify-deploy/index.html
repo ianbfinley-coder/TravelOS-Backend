@@ -1559,7 +1559,7 @@
   async function finishSignIn(d) {
     var factor = verifiedTotp(d && d.user);
     if (factor) {
-      pendingMfa = { factorId: factor.id, token: d.access_token, weak: d.weak_password || null };
+      pendingMfa = { factorId: factor.id, token: d.access_token, weak: d.weak_password || null, user: d.user || null };
       showMfa(true);
       $("mfaCode").value = "";
       $("mfaCode").focus();
@@ -1567,7 +1567,7 @@
     }
     saveSession(normalize(d));
     noteWeakPassword(d);
-    ensurePlatform(false); claimPendingInvite();
+    ensurePlatform(false); claimPendingInvite(d && d.user);
     renderAuth();
     loadTrips();
   }
@@ -1584,13 +1584,13 @@
       if (!c.ok || !c.data || !c.data.id) { authError(c.detail || "Could not start verification. Please sign in again."); return; }
       var v = await call("POST", base + "/verify", { body: { challenge_id: c.data.id, code: code }, auth: false, headers: h });
       if (!v.ok || !v.data || !v.data.access_token) { authError(v.detail || "That code was not accepted."); return; }
-      var weak = pendingMfa.weak;
+      var weak = pendingMfa.weak, mfaUser = pendingMfa.user;
       pendingMfa = null;
       $("mfaCode").value = "";
       showMfa(false);
       saveSession(normalize(v.data));
       noteWeakPassword({ weak_password: weak });
-      ensurePlatform(false); claimPendingInvite();
+      ensurePlatform(false); claimPendingInvite(v.data.user || mfaUser);
       renderAuth();
       loadTrips();
     } catch (e) {
@@ -4020,14 +4020,29 @@
     authError("");
     this.disabled = true;
     try {
-      var r = await call("POST", "/auth/v1/signup?redirect_to=" + encodeURIComponent(location.origin + "/"), { body: withCaptcha({ email: email, password: p1 }), auth: false });
+      // A pending invite is saved on the new account too, so it is claimed
+      // wherever the confirmation link is opened (often a different window
+      // from the one the invite link was opened in).
+      var inv = peekPendingInvite();
+      var suBody = { email: email, password: p1 };
+      if (inv) suBody.data = { pending_invite: inv };
+      var r = await call("POST", "/auth/v1/signup?redirect_to=" + encodeURIComponent(location.origin + "/"), { body: withCaptcha(suBody), auth: false });
       resetCaptcha();
       if (!r.ok) { authError(r.detail || ("Sign-up was refused (" + r.status + ").")); return; }
+      // Supabase answers a sign-up for an address that already has a confirmed
+      // account with a user that has no identities, and sends nothing.
+      var su = r.data && (r.data.user || r.data);
+      if (!r.data.access_token && su && Array.isArray(su.identities) && su.identities.length === 0) {
+        $("suPw1").value = ""; $("suPw2").value = "";
+        updatePwCount("suPw1", "suPwCount");
+        authError("An account with " + email + " already exists. Choose Sign in instead, or use Forgot password? if you don't know its password.");
+        return;
+      }
       $("suPw1").value = "";
       $("suPw2").value = "";
       updatePwCount("suPw1", "suPwCount");
       if (r.data && r.data.access_token) { await finishSignIn(r.data); return; }
-      $("signUpSent").textContent = "Almost done. We sent a confirmation link to " + email + ". Open it in this browser to finish creating your account.";
+      $("signUpSent").textContent = "Almost done. We sent a confirmation link to " + email + ". Open it to finish creating your account" + (inv ? "; you'll join the trip as soon as it opens." : ".");
       $("signUpSent").hidden = false;
     } catch (e) {
       authError(NETWORK_HINT);
@@ -5299,11 +5314,18 @@
     var tok = q.get("token");
     if (!tok || !/^\/join\/?$/.test(location.pathname)) return null;
     // Take the token out of the address bar and history straight away.
-    try { history.replaceState(null, "", "/"); } catch (e) { /* ignore */ }
+    try { history.replaceState(null, "", "/" + location.hash); } catch (e) { /* ignore */ }
     return tok;
   }
   function savePendingInvite(tok) {
     try { localStorage.setItem(PENDING_INVITE_KEY, JSON.stringify({ t: tok, at: Date.now() })); } catch (e) { /* private window */ }
+  }
+  function peekPendingInvite() {
+    try {
+      var v = JSON.parse(localStorage.getItem(PENDING_INVITE_KEY) || "null");
+      if (v && v.t && Date.now() - v.at < 86400000) return v.t;
+    } catch (e) { /* ignore */ }
+    return null;
   }
   function takePendingInvite() {
     try {
@@ -5314,10 +5336,13 @@
     } catch (e) { /* ignore */ }
     return null;
   }
-  async function claimPendingInvite() {
-    var tok = takePendingInvite();
+  async function claimPendingInvite(user) {
+    var saved = user && user.user_metadata && user.user_metadata.pending_invite;
+    var tok = takePendingInvite() || (typeof saved === "string" ? saved : null);
     if (!tok || !session || !session.access_token) return;
     var r = await call("POST", "/functions/v1/platform-auth/guest/claim", { body: {}, headers: { "X-Guest-Token": tok } });
+    // The invite saved on the account is used once, whatever the outcome.
+    if (saved) call("PUT", "/auth/v1/user", { body: { data: { pending_invite: null } } }).catch(function () { /* ignore */ });
     if (r.ok && r.data && r.data.tripId) {
       platformReady = true;
       showBanner("You've joined the trip. It's now in your trip list.");
