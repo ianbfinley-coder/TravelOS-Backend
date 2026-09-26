@@ -151,6 +151,19 @@
   .row > * { flex: 1 1 150px; min-width: 0; }
   .row > .shrink { flex: 0 0 auto; }
   .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+  /* plans (web wave 20) */
+  .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .plan { border: 1px solid var(--line-2); border-radius: 16px; padding: 14px 16px; background: var(--card-2);
+          display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .plan.best { border-color: var(--accent); }
+  .plan h3 { margin: 0; font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .plan .price { font-size: 22px; font-weight: 800; letter-spacing: -.01em; }
+  .plan .price small { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  .plan ul { margin: 0; padding-left: 18px; font-size: 13.5px; color: var(--ink-2); }
+  .plan ul li { margin: 3px 0; }
+  .plan .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 4px; }
+  .faq dt { font-weight: 700; font-size: 14px; margin-top: 12px; }
+  .faq dd { margin: 4px 0 0; font-size: 13.5px; color: var(--ink-2); }
 
   /* ── status chips ─────────────────────────────────────────── */
   .chip {
@@ -364,6 +377,7 @@
   </div>
 
   <div id="netBanner" class="hazard" hidden style="margin-bottom:16px"></div>
+  <div id="planPrompt" class="hazard" hidden style="margin-bottom:16px"><span id="planPromptText"></span> <button id="planPromptBtn" class="tiny" type="button" style="margin-left:8px">See plans</button></div>
 
   <!-- ── sign in ───────────────────────────────────────────── -->
   <section class="panel" id="authPanel">
@@ -565,6 +579,39 @@
   </section>
 
   <!-- ── trip ──────────────────────────────────────────────── -->
+  <!-- ── plans (web wave 20) ─────────────────────────────────── -->
+  <section class="panel" id="plansPanel" hidden>
+    <header>
+      <h2>Plans</h2>
+      <button id="plansClose" class="ghost tiny" type="button">Close</button>
+    </header>
+    <div class="body">
+      <p class="note" style="margin:0 0 12px">Joining trips is always free. The person who organizes a trip decides its plan, and everyone on a paid trip gets the paid features on that trip.</p>
+      <div class="plans" id="plansCards"></div>
+      <p class="note" id="plansMsg" style="margin:10px 0 0" hidden></p>
+      <h3 class="subhead" style="margin-top:18px">What paid trips add</h3>
+      <ul class="note" style="margin:0;padding-left:18px">
+        <li>AI Trip Copilot that knows your whole trip</li>
+        <li>Trip health, issue checks and day-by-day friction scores</li>
+        <li>Offline packs for when you have no signal</li>
+        <li>Safety intelligence and travel advisories</li>
+        <li>Advanced group decisions: ranked and fairness-weighted voting</li>
+        <li>Up to 12 people per trip (4 on Free)</li>
+      </ul>
+      <h3 class="subhead" style="margin-top:18px">Questions</h3>
+      <dl class="faq" style="margin:0">
+        <dt>Do the people I invite have to pay?</dt>
+        <dd>No. Everyone on a paid trip uses the paid features on that trip for free. They only need their own plan for trips they organize.</dd>
+        <dt>Trip Pass or Pro?</dt>
+        <dd>A Trip Pass is a one-time purchase that unlocks one trip. Pro unlocks every trip you organize, as long as you subscribe.</dd>
+        <dt>What happens if I cancel Pro?</dt>
+        <dd>You keep Pro until the end of the period you paid for, then your account moves to Free. Your trips stay; paid features turn off.</dd>
+        <dt>Can I switch between monthly and yearly?</dt>
+        <dd>Yes. Use Manage billing in your account.</dd>
+      </dl>
+    </div>
+  </section>
+
   <section class="panel" id="tripPanel" hidden>
     <header>
       <h2>Trip</h2>
@@ -1418,6 +1465,8 @@
       detail = (parsed && (parsed.error_description || parsed.msg || (typeof parsed.error === "string" ? parsed.error : null)
         || (parsed.error && parsed.error.message) || parsed.message)) || text.slice(0, 110);
     }
+    // A paid feature or a free-plan limit (web wave 20): offer the Plans view.
+    if (status === 402 && typeof planPrompt === "function") { try { planPrompt(detail); } catch (e) { /* ignore */ } }
     return { status: status, ok: status >= 200 && status < 300, data: parsed, text: text, detail: detail };
   }
 
@@ -1694,6 +1743,9 @@
     if ($("planLine")) $("planLine").hidden = true;
     if ($("billingBox")) { $("billingBox").hidden = true; $("billingBox").innerHTML = ""; }
     if ($("tripPassBox")) $("tripPassBox").hidden = true;
+    if ($("plansPanel")) $("plansPanel").hidden = true;
+    if ($("planPrompt")) $("planPrompt").hidden = true;
+    billing.plan = null;
     billing.passSeq++;
     platformReady = false;
     trips = []; reservations = [];
@@ -1821,11 +1873,13 @@
     box.hidden = true;
     box.innerHTML = "";
     billingMsg("");
+    billing.plan = plan;
     var cfg = await loadBillingConfig();
     if (!cfg || !cfg.configured || !session || !session.access_token) return;
+    var seePlans = '<button class="ghost tiny" type="button" data-plans>See plans</button>';
     if (plan.paid) {
       if (plan.source !== "stripe") return;
-      box.innerHTML = '<button class="ghost tiny" type="button" data-portal>Manage billing</button>';
+      box.innerHTML = '<button class="ghost tiny" type="button" data-portal>Manage billing</button>' + seePlans;
     } else {
       var html = "";
       [["pro_monthly", "Upgrade to Pro"], ["pro_yearly", "Pro yearly"]].forEach(function (k) {
@@ -1833,7 +1887,7 @@
         if (p) html += '<button class="tiny" type="button" data-kind="' + k[0] + '">' + esc(k[1] + " \u00b7 " + priceLabel(p)) + "</button>";
       });
       if (!html) return;
-      box.innerHTML = html;
+      box.innerHTML = html + seePlans;
     }
     box.hidden = false;
   }
@@ -1841,6 +1895,7 @@
     var b = e.target.closest("button");
     if (!b || b.disabled) return;
     billingMsg("");
+    if (b.hasAttribute("data-plans")) { openPlans(); return; }
     if (b.hasAttribute("data-portal")) {
       b.disabled = true;
       var r = null;
@@ -1879,6 +1934,101 @@
     var t = currentTrip();
     if (!t || this.disabled) return;
     startCheckout("trip_pass", t.id, this, function (m) { $("tripPassText").textContent = m; });
+  });
+
+  // ── plans view (web wave 20) ───────────────────────────────
+  // One place to compare Free, Trip Pass and Pro. Prices come from
+  // billing/config (read from Stripe), so this never disagrees with Checkout.
+  // Opened from "See plans" in the account box and from the upgrade prompt
+  // shown when a paid feature or a free limit answers 402.
+  function plansMsg(t, isErr) {
+    var el = $("plansMsg");
+    el.textContent = t || "";
+    el.hidden = !t;
+    el.className = isErr ? "err" : "note";
+  }
+  function yearlySaving() {
+    var m = billingPlan("pro_monthly"), y = billingPlan("pro_yearly");
+    if (!m || !y || !m.amount || !y.amount) return 0;
+    return Math.round((1 - y.amount / (m.amount * 12)) * 100);
+  }
+  async function renderPlans() {
+    var box = $("plansCards");
+    plansMsg("");
+    var cfg = await loadBillingConfig();
+    var live = !!(cfg && cfg.configured);
+    var plan = billing.plan || {};
+    var paid = !!plan.paid, founder = plan.source === "founder", viaStripe = plan.source === "stripe";
+    var m = billingPlan("pro_monthly"), y = billingPlan("pro_yearly"), tp = billingPlan("trip_pass");
+    var save = yearlySaving();
+    var passReady = !$("tripPassBox").hidden;
+    var t = currentTrip();
+
+    var free = '<div class="plan"><h3>Free' + (!paid ? ' <span class="chip mute">Your plan</span>' : "") + "</h3>"
+      + '<div class="price">$0</div><ul>'
+      + "<li>1 active trip you organize</li><li>Up to 4 people per trip</li>"
+      + "<li>Join as many trips as you're invited to</li>"
+      + "<li>Itinerary, reservations, expenses, map, polls and invites</li></ul></div>";
+
+    var passActs = "";
+    if (live && tp) {
+      if (passReady && t) passActs = '<button class="tiny" type="button" data-pass>Add to ' + esc(t.name || t.title || "this trip") + "</button>";
+      else passActs = '<span class="note tiny">Open a trip you organize to add one.</span>';
+    }
+    var pass = '<div class="plan"><h3>Trip Pass</h3>'
+      + '<div class="price">' + (tp ? esc(priceLabel(tp)) : "—") + " <small>one time</small></div><ul>"
+      + "<li>Every paid feature on one trip</li><li>For everyone on that trip</li><li>Up to 12 people</li></ul>"
+      + '<div class="acts">' + passActs + "</div></div>";
+
+    var proActs = "";
+    if (live) {
+      if (founder) proActs = '<span class="chip ok">You have Pro (founder)</span>';
+      else if (paid && viaStripe) proActs = '<button class="ghost tiny" type="button" data-portal>Manage billing</button>';
+      else if (!paid) {
+        if (m) proActs += '<button class="tiny" type="button" data-kind="pro_monthly">Monthly · ' + esc(priceLabel(m)) + "</button>";
+        if (y) proActs += '<button class="tiny" type="button" data-kind="pro_yearly">Yearly · ' + esc(priceLabel(y)) + "</button>";
+      }
+    }
+    var pro = '<div class="plan best"><h3>Pro' + (paid ? ' <span class="chip ok">Your plan</span>' : "")
+      + (!paid && save > 0 ? ' <span class="chip acc">Save ' + save + "% yearly</span>" : "") + "</h3>"
+      + '<div class="price">' + (m ? esc(priceLabel(m)) : "—") + (y ? " <small>or " + esc(priceLabel(y)) + "</small>" : "") + "</div><ul>"
+      + "<li>Every paid feature on every trip you organize</li><li>Unlimited trips</li><li>Up to 12 people per trip</li>"
+      + "<li>Cancel any time</li></ul>"
+      + '<div class="acts">' + proActs + "</div></div>";
+
+    box.innerHTML = free + pass + pro;
+    if (!live) plansMsg("Paid plans aren't available yet. Everything on Free keeps working.");
+  }
+  function openPlans() {
+    var panel = $("plansPanel");
+    panel.hidden = false;
+    $("planPrompt").hidden = true;
+    renderPlans();
+    try { panel.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) { panel.scrollIntoView(); }
+  }
+  function planPrompt(message) {
+    if (!session || !session.access_token) return;
+    $("planPromptText").textContent = message || "That's part of a paid plan.";
+    $("planPrompt").hidden = false;
+  }
+  $("planPromptBtn").addEventListener("click", openPlans);
+  $("plansClose").addEventListener("click", function () { $("plansPanel").hidden = true; });
+  $("plansCards").addEventListener("click", async function (e) {
+    var b = e.target.closest("button");
+    if (!b || b.disabled) return;
+    plansMsg("");
+    if (b.hasAttribute("data-pass")) { $("tripPassBtn").click(); return; }
+    if (b.hasAttribute("data-portal")) {
+      b.disabled = true;
+      var r = null;
+      try { r = await call("POST", "/functions/v1/billing/portal"); } catch (e2) { r = null; }
+      if (r && r.ok && r.data && r.data.url) { location.href = r.data.url; return; }
+      b.disabled = false;
+      plansMsg(r ? billingErrText(r, "Billing couldn't open right now. Try again in a moment.") : NETWORK_HINT, true);
+      return;
+    }
+    var kind = b.getAttribute("data-kind");
+    if (kind) startCheckout(kind, null, b, function (m) { plansMsg(m, true); });
   });
 
   // ── trips ──────────────────────────────────────────────────
@@ -3830,6 +3980,13 @@
       }
     });
     $("chatSend").disabled = false;
+    if (r.status === 402) {
+      // A paid feature on a free trip: answer calmly in the chat; the plan
+      // prompt at the top of the page offers the Plans view (web wave 20).
+      chatMessages.push({ role: "assistant", text: r.detail || "The AI Trip Copilot is part of a paid plan." });
+      renderChat();
+      return;
+    }
     if (!r.ok) {
       $("chatErr").textContent = r.status === 502
         ? "The AI service refused the request — bad model, no credit, or a rate limit."
@@ -5734,7 +5891,8 @@
     if (saved) call("PUT", "/auth/v1/user", { body: { data: { pending_invite: null } } }).catch(function () { /* ignore */ });
     if (r.ok && r.data && r.data.tripId) {
       platformReady = true;
-      showBanner("You've joined the trip. It's now in your trip list.");
+      showBanner(r.data.alreadyMember ? "You're already on this trip, so you don't need the invite link. Here it is."
+        : "You've joined the trip. It's now in your trip list.");
       await loadTrips(r.data.tripId);
       return;
     }
