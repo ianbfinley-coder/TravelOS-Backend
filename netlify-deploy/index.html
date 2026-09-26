@@ -489,6 +489,7 @@
           <div class="shrink"><button id="signOut" class="ghost" type="button">Sign out</button></div>
         </div>
         <p class="note" id="weakPwNote" style="margin:10px 0 0" hidden></p>
+        <p class="note" id="planLine" style="margin:8px 0 0" hidden></p>
         <details id="pwDetails" style="margin-top:12px">
           <summary class="note" style="cursor:pointer">Change password</summary>
           <div style="margin-top:8px">
@@ -1684,6 +1685,8 @@
     if ($("pwDetails")) $("pwDetails").open = false;
     if ($("mfaDetails")) $("mfaDetails").open = false;
     if ($("idDetails")) $("idDetails").open = false;
+    planState.forUser = null; planState.seq++;
+    if ($("planLine")) $("planLine").hidden = true;
     platformReady = false;
     trips = []; reservations = [];
     renderAuth();
@@ -1720,9 +1723,38 @@
     chip.textContent = on ? "signed in" : "signed out";
     if (on) {
       $("whoami").textContent = session.email || session.user_id;
+      loadPlan();
     } else if (typeof medReset === "function") {
       medReset();
     }
+  }
+
+  // ── plan (monetization step 2, web wave 16) ───────────────
+  // my_plan() -> { plan, paid, source, current_period_end, owned_trip_limit,
+  // member_cap, enforced }. Shown under "Signed in as". Limits are only
+  // mentioned once billing enforcement is on, so nothing changes for anyone
+  // before launch.
+  var planState = { forUser: null, seq: 0 };
+  async function loadPlan() {
+    if (!session || !session.access_token) return;
+    var who = session.user_id || session.email;
+    if (planState.forUser === who) return;
+    planState.forUser = who;
+    var seq = ++planState.seq, r = null;
+    try { r = await rpc("my_plan", {}); } catch (e) { r = null; }
+    if (seq !== planState.seq) return;
+    var el = $("planLine");
+    if (!r || !r.ok || !r.data || r.data.ok !== true) { planState.forUser = null; el.hidden = true; return; }
+    var d = r.data, text;
+    if (d.paid) {
+      text = "Plan: " + (d.plan === "group" ? "Group" : "Pro") + (d.source === "founder" ? " (founder)" : "");
+      if (d.current_period_end) text += " \u00b7 renews " + String(d.current_period_end).slice(0, 10);
+    } else {
+      text = "Plan: Free";
+      if (d.enforced) text += " \u00b7 " + d.owned_trip_limit + " active trip, up to " + d.member_cap + " people per trip";
+    }
+    el.textContent = text;
+    el.hidden = false;
   }
 
   // ── trips ──────────────────────────────────────────────────
