@@ -490,6 +490,8 @@
         </div>
         <p class="note" id="weakPwNote" style="margin:10px 0 0" hidden></p>
         <p class="note" id="planLine" style="margin:8px 0 0" hidden></p>
+        <div id="billingBox" hidden style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"></div>
+        <p class="note" id="billingMsg" style="margin:6px 0 0" hidden></p>
         <details id="pwDetails" style="margin-top:12px">
           <summary class="note" style="cursor:pointer">Change password</summary>
           <div style="margin-top:8px">
@@ -575,6 +577,7 @@
         <div class="shrink"><button id="newTrip" class="ghost tiny" type="button">New trip</button></div>
       </div>
       <div id="tripMeta" style="margin-top:10px;color:var(--ink-2);font-size:13px"></div>
+      <div id="tripPassBox" hidden style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="note tiny" id="tripPassText"></span><button id="tripPassBtn" class="tiny" type="button"></button></div>
       <form id="tripForm" hidden style="border:1px solid var(--line);border-radius:9px;padding:12px;margin-top:12px;background:var(--card-2)">
         <div class="grid2">
           <div><label class="f" for="tName">Name</label><input id="tName" type="text" required></div>
@@ -1687,6 +1690,9 @@
     if ($("idDetails")) $("idDetails").open = false;
     planState.forUser = null; planState.seq++;
     if ($("planLine")) $("planLine").hidden = true;
+    if ($("billingBox")) { $("billingBox").hidden = true; $("billingBox").innerHTML = ""; }
+    if ($("tripPassBox")) $("tripPassBox").hidden = true;
+    billing.passSeq++;
     platformReady = false;
     trips = []; reservations = [];
     renderAuth();
@@ -1755,7 +1761,121 @@
     }
     el.textContent = text;
     el.hidden = false;
+    renderBillingBox(d);
   }
+
+  // ── billing (monetization step 3, web wave 17) ─────────────
+  // billing/config -> { configured, plans: [{ kind, amount, currency, interval }] }
+  // with prices read from Stripe. Nothing here shows until Stripe is set up.
+  // Checkout and the customer portal are Stripe-hosted pages; card details
+  // never touch this site.
+  var billing = { config: null, loading: null, passSeq: 0 };
+  function loadBillingConfig() {
+    if (billing.config) return Promise.resolve(billing.config);
+    if (billing.loading) return billing.loading;
+    billing.loading = (async function () {
+      var r = null;
+      try { r = await call("GET", "/functions/v1/billing/config"); } catch (e) { r = null; }
+      billing.loading = null;
+      if (r && r.ok && r.data) billing.config = r.data;
+      return billing.config;
+    })();
+    return billing.loading;
+  }
+  function billingPlan(kind) {
+    var c = billing.config;
+    if (!c || !c.configured || !Array.isArray(c.plans)) return null;
+    return c.plans.filter(function (p) { return p.kind === kind; })[0] || null;
+  }
+  function priceLabel(p) {
+    if (!p || p.amount == null) return "";
+    var amt;
+    try { amt = new Intl.NumberFormat(undefined, { style: "currency", currency: String(p.currency || "usd").toUpperCase() }).format(p.amount / 100); }
+    catch (e) { amt = (p.amount / 100).toFixed(2); }
+    return amt + (p.interval === "month" ? "/mo" : p.interval === "year" ? "/yr" : "");
+  }
+  function billingMsg(t, isErr) {
+    var el = $("billingMsg");
+    el.textContent = t || "";
+    el.hidden = !t;
+    el.className = isErr ? "err" : "note";
+  }
+  function billingErrText(r, fallback) {
+    var d = (r && r.data) || {};
+    return (typeof d.error === "string" && d.error) || fallback;
+  }
+  async function startCheckout(kind, tripId, btn, onError) {
+    if (btn) btn.disabled = true;
+    var r = null;
+    try { r = await call("POST", "/functions/v1/billing/checkout", { body: tripId ? { kind: kind, tripId: tripId } : { kind: kind } }); } catch (e) { r = null; }
+    if (r && r.ok && r.data && r.data.url) { location.href = r.data.url; return; }
+    if (btn) btn.disabled = false;
+    onError(r ? billingErrText(r, "Checkout couldn't start right now. Try again in a moment.") : NETWORK_HINT);
+  }
+  async function renderBillingBox(plan) {
+    var box = $("billingBox");
+    box.hidden = true;
+    box.innerHTML = "";
+    billingMsg("");
+    var cfg = await loadBillingConfig();
+    if (!cfg || !cfg.configured || !session || !session.access_token) return;
+    if (plan.paid) {
+      if (plan.source !== "stripe") return;
+      box.innerHTML = '<button class="ghost tiny" type="button" data-portal>Manage billing</button>';
+    } else {
+      var html = "";
+      [["pro_monthly", "Upgrade to Pro"], ["pro_yearly", "Pro yearly"]].forEach(function (k) {
+        var p = billingPlan(k[0]);
+        if (p) html += '<button class="tiny" type="button" data-kind="' + k[0] + '">' + esc(k[1] + " \u00b7 " + priceLabel(p)) + "</button>";
+      });
+      if (!html) return;
+      box.innerHTML = html;
+    }
+    box.hidden = false;
+  }
+  $("billingBox").addEventListener("click", async function (e) {
+    var b = e.target.closest("button");
+    if (!b || b.disabled) return;
+    billingMsg("");
+    if (b.hasAttribute("data-portal")) {
+      b.disabled = true;
+      var r = null;
+      try { r = await call("POST", "/functions/v1/billing/portal"); } catch (e2) { r = null; }
+      if (r && r.ok && r.data && r.data.url) { location.href = r.data.url; return; }
+      b.disabled = false;
+      billingMsg(r ? billingErrText(r, "Billing couldn't open right now. Try again in a moment.") : NETWORK_HINT, true);
+      return;
+    }
+    startCheckout(b.getAttribute("data-kind"), null, b, function (m) { billingMsg(m, true); });
+  });
+
+  // Trip Pass: offered to the owner or an organizer of a trip on the free plan.
+  async function tripPassOnTripChange() {
+    var box = $("tripPassBox");
+    box.hidden = true;
+    var t = currentTrip(), seq = ++billing.passSeq;
+    if (!t || !session || !session.access_token) return;
+    var cfg = await loadBillingConfig();
+    var p = billingPlan("trip_pass");
+    if (!cfg || !p || seq !== billing.passSeq) return;
+    var acc = null, role = null;
+    try {
+      var rs = await Promise.all([rpc("trip_access", { p_trip_id: t.id }), rpc("my_trip_role", { p_trip_id: t.id })]);
+      acc = rs[0] && rs[0].ok ? rs[0].data : null;
+      role = rs[1] && rs[1].ok && rs[1].data ? rs[1].data.role : null;
+    } catch (e) { return; }
+    if (seq !== billing.passSeq || !acc || acc.ok !== true || acc.paid) return;
+    if (role !== "owner" && role !== "organizer") return;
+    $("tripPassText").textContent = "This trip is on the free plan.";
+    $("tripPassBtn").textContent = "Add a Trip Pass \u00b7 " + priceLabel(p);
+    $("tripPassBtn").disabled = false;
+    box.hidden = false;
+  }
+  $("tripPassBtn").addEventListener("click", function () {
+    var t = currentTrip();
+    if (!t || this.disabled) return;
+    startCheckout("trip_pass", t.id, this, function (m) { $("tripPassText").textContent = m; });
+  });
 
   // ── trips ──────────────────────────────────────────────────
   function newTripDefaults() {
@@ -1834,6 +1954,7 @@
     loadItinerary();
     fxOnTripChange();
     planOnTripChange();
+    tripPassOnTripChange();
     // The role comes from the expense group's members; once it is known,
     // Select / Add to calendar are shown or hidden to match.
     // Packing, trip chat and polls also wait for the role / expense group.
@@ -6665,6 +6786,19 @@
   session = loadSession();
   var inviteTok = readInviteToken();
   if (inviteTok) savePendingInvite(inviteTok);
+  // Back from Stripe Checkout (web wave 17).
+  (function () {
+    var q = new URLSearchParams(location.search);
+    var b = q.get("billing");
+    if (!b) return;
+    try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) { /* ignore */ }
+    if (b === "success") {
+      showBanner("Thanks! Your purchase is being applied. It can take a few seconds to show up.");
+      setTimeout(function () { planState.forUser = null; loadPlan(); tripPassOnTripChange(); }, 5000);
+    } else if (b === "cancel") {
+      showBanner("Checkout was canceled. Nothing was charged.");
+    }
+  })();
   var landing = readAuthRedirect();
   var linking = null;
   try { linking = sessionStorage.getItem(LINK_KEY); sessionStorage.removeItem(LINK_KEY); } catch (e) { linking = null; }
