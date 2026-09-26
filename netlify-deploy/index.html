@@ -5512,6 +5512,20 @@
     var a = rHealth.ok && rHealth.data ? rHealth.data.analysis : null;
     var html = "";
 
+    // OUT OF DATE (web wave 11, 2026-09-26): each reader returns `stale`
+    // (true / false / null). true = the itinerary or a booking changed after
+    // that result was produced. null = unknown, so no note either way.
+    var staleOf = function (r) { return r && r.ok && r.data && typeof r.data === "object" ? r.data.stale : null; };
+    var staleVals = [staleOf(rHealth), staleOf(rFriction), staleOf(rIssues)];
+    var isStale = staleVals.some(function (v) { return v === true; });
+    var knownFresh = !isStale && staleOf(rHealth) === false;
+    if (isStale) {
+      html += '<div class="res" id="healthStale" style="margin:0 0 12px"><div class="top"><span class="name">Out of date</span>'
+        + '<span class="chip warn">Needs a new check</span></div>'
+        + '<p style="margin:8px 0 0;font-size:14px">The itinerary or bookings changed since this was last checked, so some of what\'s below may no longer be accurate.</p>'
+        + '<p class="note" style="margin:6px 0 0">' + (viewer ? "Someone who can edit the trip can run a new check." : "Choose Run check to update it.") + "</p></div>";
+    }
+
     // Overall score
     html += '<div class="subhead">Overall</div>';
     if (a) {
@@ -5529,7 +5543,7 @@
           + '" style="display:block;width:' + (v * 5) + '%"></span></span><span class="num">' + esc(String(Math.round(v))) + "/20</span></div>";
       }).join("") + "</div>";
       html += '<p class="note tiny" style="margin:10px 0 0">Checked ' + esc(when(a.analyzed_at || a.created_at))
-        + (rHealth.data.matched_version === false ? " on an earlier version of the itinerary. Run a new check to include recent changes." : ".") + "</p>";
+        + (rHealth.data.matched_version === false && !knownFresh && !isStale ? " on an earlier version of the itinerary. Run a new check to include recent changes." : ".") + "</p>";
     } else if (rHealth.ok) {
       html += '<p class="note" style="margin:0">No check has been run on this trip yet. '
         + (viewer ? "Someone who can edit the trip can run one." : "Choose Run check to see how the plan holds up.") + "</p>";
