@@ -536,6 +536,14 @@
             <p class="note" id="mfaMsg" style="margin:8px 0 0" hidden></p>
           </div>
         </details>
+        <details id="idDetails" style="margin-top:12px">
+          <summary class="note" style="cursor:pointer">Sign-in methods</summary>
+          <div style="margin-top:8px">
+            <p class="note tiny" style="margin:0 0 8px">Connect Google or Apple so they open this same account, with all your trips.</p>
+            <div id="idList"></div>
+            <p class="note" id="idMsg" style="margin:8px 0 0" hidden></p>
+          </div>
+        </details>
         <details id="prefDetails" style="margin-top:12px">
           <summary class="note" style="cursor:pointer">Travel preferences</summary>
           <div style="margin-top:8px">
@@ -1675,6 +1683,7 @@
     noteWeakPassword(null);
     if ($("pwDetails")) $("pwDetails").open = false;
     if ($("mfaDetails")) $("mfaDetails").open = false;
+    if ($("idDetails")) $("idDetails").open = false;
     platformReady = false;
     trips = []; reservations = [];
     renderAuth();
@@ -4170,14 +4179,113 @@
   function appleAuthorizeUrl() {
     return URL_BASE + "/auth/v1/authorize?provider=apple&redirect_to=" + encodeURIComponent(location.origin + "/");
   }
+  var appleReady = false;
   (async function probeApple() {
     try {
       var r = await fetch(appleAuthorizeUrl(), { redirect: "manual", cache: "no-store", credentials: "omit" });
-      $("appleBtn").hidden = r.type !== "opaqueredirect";
-    } catch (e) { $("appleBtn").hidden = true; }
+      appleReady = r.type === "opaqueredirect";
+    } catch (e) { appleReady = false; }
+    $("appleBtn").hidden = !appleReady;
+    if ($("idDetails").open) loadIdentities();
   })();
   $("appleBtn").addEventListener("click", function () {
     location.href = appleAuthorizeUrl();
+  });
+
+  // Sign-in methods (web wave 15): connect Google or Apple to the signed-in
+  // account with Supabase manual linking, or disconnect one while another
+  // method remains. Linking leaves for the provider's page and comes back
+  // with a fresh session in the URL fragment for the same user, which the
+  // landing code finishes like any other sign-in (including two-step).
+  var LINK_KEY = "travelos.linking";
+  var ID_PROVIDERS = [
+    { key: "email", label: "Email and password" },
+    { key: "google", label: "Google" },
+    { key: "apple", label: "Apple" }
+  ];
+  function providerLabel(k) {
+    for (var i = 0; i < ID_PROVIDERS.length; i++) if (ID_PROVIDERS[i].key === k) return ID_PROVIDERS[i].label;
+    return k;
+  }
+  function idMsg(t, isErr) {
+    var el = $("idMsg");
+    el.textContent = t || "";
+    el.hidden = !t;
+    el.className = isErr ? "err" : "note";
+  }
+  function linkErrorText(provider, detail) {
+    var d = String(detail || "").toLowerCase();
+    var name = providerLabel(provider);
+    if (d.indexOf("manual linking") >= 0) return "Connecting another sign-in method is turned off on the server right now.";
+    if (d.indexOf("already") >= 0 || d.indexOf("exists") >= 0) return "That " + name + " account already belongs to a different TravelOS account, so it can't be connected here.";
+    return name + " couldn't be connected. Try again in a moment.";
+  }
+  var idState = { list: [] };
+  async function loadIdentities() {
+    var box = $("idList");
+    var u = null;
+    try { u = await call("GET", "/auth/v1/user"); } catch (e) { u = null; }
+    if (!u || !u.ok || !u.data) { box.innerHTML = ""; idMsg("Your sign-in methods couldn't be loaded right now.", true); return; }
+    idState.list = Array.isArray(u.data.identities) ? u.data.identities : [];
+    var have = {};
+    idState.list.forEach(function (i) { have[i.provider] = i; });
+    var canRemove = idState.list.length > 1;
+    box.innerHTML = ID_PROVIDERS.map(function (p) {
+      var on = !!have[p.key], btn = "";
+      if (p.key !== "email") {
+        if (on && canRemove) btn = '<button class="ghost tiny" type="button" data-unlink="' + esc(p.key) + '">Disconnect</button>';
+        else if (!on && (p.key !== "apple" || appleReady)) btn = '<button class="tiny" type="button" data-link="' + esc(p.key) + '">Connect ' + esc(p.label) + "</button>";
+      }
+      if (!on && p.key === "email") return "";
+      return '<div class="row" style="align-items:center;margin-bottom:6px"><div>' + esc(p.label) + " "
+        + (on ? '<span class="chip ok">Connected</span>' : '<span class="chip mute">Not connected</span>')
+        + '</div><div class="shrink">' + btn + "</div></div>";
+    }).join("");
+  }
+  $("idDetails").addEventListener("toggle", function () {
+    if (this.open) { idMsg(""); loadIdentities(); }
+  });
+  $("idList").addEventListener("click", async function (e) {
+    var b = e.target.closest("[data-link],[data-unlink]");
+    if (!b || b.disabled) return;
+    idMsg("");
+    var provider = b.getAttribute("data-link") || b.getAttribute("data-unlink");
+    if (b.hasAttribute("data-link")) {
+      b.disabled = true;
+      var r = null;
+      try {
+        r = await call("GET", "/auth/v1/user/identities/authorize?provider=" + encodeURIComponent(provider)
+          + "&redirect_to=" + encodeURIComponent(location.origin + "/") + "&skip_http_redirect=true");
+      } catch (e1) { r = null; }
+      if (!r || !r.ok || !r.data || !r.data.url) {
+        b.disabled = false;
+        idMsg(r ? linkErrorText(provider, r.detail) : NETWORK_HINT, true);
+        return;
+      }
+      try { sessionStorage.setItem(LINK_KEY, provider); } catch (e2) { /* ignore */ }
+      location.href = r.data.url;
+      return;
+    }
+    // Disconnect needs a second tap, so a stray click can't remove a method.
+    if (b.dataset.armed !== "1") {
+      b.dataset.armed = "1";
+      b.textContent = "Tap again to disconnect";
+      setTimeout(function () { if (b.isConnected) { b.dataset.armed = ""; b.textContent = "Disconnect"; } }, 5000);
+      return;
+    }
+    var ident = null;
+    idState.list.forEach(function (i) { if (i.provider === provider) ident = i; });
+    if (!ident || idState.list.length < 2) { loadIdentities(); return; }
+    b.disabled = true;
+    var d = null;
+    try { d = await call("DELETE", "/auth/v1/user/identities/" + encodeURIComponent(ident.identity_id || ident.id)); } catch (e3) { d = null; }
+    if (!d || !d.ok) {
+      b.disabled = false;
+      idMsg(d && d.detail ? providerLabel(provider) + " couldn't be disconnected: " + d.detail : "That didn't work. Try again in a moment.", true);
+      return;
+    }
+    idMsg(providerLabel(provider) + " is disconnected. It will no longer open this account.");
+    loadIdentities();
   });
 
   // Two-step verification setup, matching the mobile Security screen.
@@ -6526,13 +6634,18 @@
   var inviteTok = readInviteToken();
   if (inviteTok) savePendingInvite(inviteTok);
   var landing = readAuthRedirect();
+  var linking = null;
+  try { linking = sessionStorage.getItem(LINK_KEY); sessionStorage.removeItem(LINK_KEY); } catch (e) { linking = null; }
   if (landing && landing.error) {
     renderAuth();
     if (session && session.access_token) loadTrips();
-    showBanner("That email link didn't work: " + landing.error + ". Request a new one.");
+    if (linking) showBanner(linkErrorText(linking, landing.error));
+    else showBanner("That email link didn't work: " + landing.error + ". Request a new one.");
   } else if (landing) {
     renderAuth();
-    handleEmailLanding(landing);
+    handleEmailLanding(landing).then(function () {
+      if (linking && session && session.access_token) showBanner(providerLabel(linking) + " is now connected. You can use Continue with " + providerLabel(linking) + " next time.");
+    });
   } else {
     renderAuth();
     if (session && session.access_token) loadTrips();
