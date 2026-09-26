@@ -865,7 +865,7 @@
     </div>
   </section>
 
-  <!-- ── polls (voting-system) ─────────────────────────────── -->
+  <!-- ── polls (group-decisions) ───────────────────────────── -->
   <section class="panel" id="pollPanel" hidden style="margin-top:16px">
     <header>
       <h2>Polls</h2>
@@ -3224,42 +3224,37 @@
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("gcSend").click(); }
   });
 
-  // ── polls (voting-system, web wave 5) ───────────────────────
-  // voting-system is keyed by the trip's expense group too.
-  //   get_polls   { groupId, tripId, limit }       -> { polls:[{..., poll_options, userVotes}] }
-  //   cast_vote   { pollId, choices:[{optionId, rank:1}] } -> 201 { voted, autoClosedPoll }
-  //   create_poll { groupId, tripId, question, options:[text], strategy:"majority" } -> 201
-  //   close_poll  { pollId }
-  // Only organizers can start polls (the backend's rule), and the creator or
-  // an organizer can close one. Viewers see polls and results but can't
-  // vote, matching the trip's view-only role. Totals show after you vote or
-  // once a poll is closed. A poll closes itself when everyone has voted.
-  var polls = { tripId: null, groupId: null, seq: 0, list: [], busy: false };
+  // ── polls (group-decisions, web wave 12) ────────────────────
+  // Web wave 12 (2026-09-26) moved polls from the retired voting-system
+  // function to group-decisions (polls_v2), the engine the mobile app and
+  // the fairness features use:
+  //   GET  /polls?tripId=                     -> [ { ...poll, options:[{id,label,sort}], ballotCount, myBallot } ]
+  //   POST /polls { tripId, question, options:[{label}], strategy:"majority", quorumPct:0 } -> 201 { poll, options }
+  //   PUT  /polls/:id/ballot { strategy:"majority", optionId }  -> { success }
+  //   POST /polls/:id/close                   -> result, or a step-6 tie ({ tieBreak:{step:6} }) left open
+  //   POST /polls/:id/organizer-choice { optionId } -> result (owner/organizer only)
+  // Anyone who can edit the trip can start a poll; account members vote
+  // (guests are read-only); the creator, owner or an organizer can close one.
+  // Votes can be changed until the poll closes. Totals show once it closes.
+  // quorumPct 0 keeps "close whenever you like" (a closed poll with too few
+  // votes would otherwise be pushed back 24 hours).
+  var polls = { tripId: null, seq: 0, list: [], busy: false };
   var pollCloseTimer = { t: null };
-  var POLL_MSG = {
-    ALREADY_VOTED: "You've already voted in this poll.",
-    POLL_CLOSED: "This poll has closed, so it isn't taking votes anymore.",
-    POLL_NOT_FOUND: "That poll isn't there anymore. The list has been refreshed.",
-    GROUP_NOT_FOUND: "You're not on this trip's polls anymore.",
-    NOT_GROUP_MEMBER: "You're not on this trip's polls anymore.",
-    DUPLICATE_OPTION_TEXT: "Each choice needs to be different.",
-    TOO_FEW_OPTIONS: "Add at least two choices.",
-    TOO_MANY_OPTIONS: "Use six choices or fewer.",
-    QUESTION_TOO_LONG: "Shorten the question a little.",
-    OPTION_TEXT_TOO_LONG: "Shorten the longer choices a little.",
-    UNAUTHORIZED: "Only the trip's organizers can do that."
-  };
+  function pollFn(method, path, body) { return call(method, "/functions/v1/group-decisions" + path, body ? { body: body } : {}); }
   function pollErrMsg(r, fallback) {
     if (!r) return NETWORK_HINT;
     var d = r.data || {};
     if (r.status === 401) return VERSION_MSG.UNAUTHORIZED;
-    return POLL_MSG[d.error] || fallback;
+    if (d.code === "POLL_CLOSED") return "This poll has closed, so it isn't taking votes anymore.";
+    if (r.status === 404) return "That poll isn't there anymore, or you're not on this trip. The list has been refreshed.";
+    if (r.status === 403) return d.error ? String(d.error) + "." : "You can't do that on this trip.";
+    return fallback;
   }
-  function pollIsOrganizer() { var r = myRole(); return r === "organizer" || r === "planner"; }
+  function pollCanManage() { var r = myRole(); return r === "owner" || r === "organizer" || r === "planner"; }
+  function pollCanStart() { var r = myRole(); return !!r && r !== "viewer"; }
   function pollReset() {
     var t = currentTrip();
     polls.tripId = t && t.id;
-    polls.groupId = null;
     polls.list = [];
     polls.seq++;
     $("pollForm").hidden = true;
@@ -3272,52 +3267,53 @@
   async function loadPolls() {
     var t = currentTrip();
     if (!t || exp.tripId !== t.id) return;
-    polls.groupId = exp.groupId || null;
-    $("togglePollAdd").hidden = !(polls.groupId && pollIsOrganizer());
-    if (!polls.groupId) {
-      $("pollList").innerHTML = '<p class="note" style="margin:0">Polls aren\'t available for this trip yet.</p>';
-      return;
-    }
-    var seq = ++polls.seq, groupId = polls.groupId, tripId = t.id, r = null;
-    try { r = await fnPost("voting-system", { action: "get_polls", groupId: groupId, tripId: tripId, limit: 20 }); } catch (e) { r = null; }
+    $("togglePollAdd").hidden = !pollCanStart();
+    var seq = ++polls.seq, tripId = t.id, r = null;
+    try { r = await pollFn("GET", "/polls?tripId=" + encodeURIComponent(tripId)); } catch (e) { r = null; }
     if (seq !== polls.seq || (currentTrip() || {}).id !== tripId) return;
-    if (!r || !r.ok || !r.data || !Array.isArray(r.data.polls)) {
+    if (!r || !r.ok || !Array.isArray(r.data)) {
       $("pollList").innerHTML = "";
       setMsg("pollMsg", pollErrMsg(r, "Polls couldn't be loaded right now. Try again in a moment."), true);
       return;
     }
-    polls.list = r.data.polls;
+    polls.list = r.data.slice(0, 25);
     pollRender();
   }
   function pollOpts(p) {
-    return (p.poll_options || []).slice().sort(function (a, b) { return (a.display_order || 0) - (b.display_order || 0); });
+    return (p.options || []).slice().sort(function (a, b) { return (a.sort || 0) - (b.sort || 0); });
   }
+  function pollTie(p) { return p.status === "open" && p.result && p.result.tieBreak && p.result.tieBreak.step === 6; }
   function pollCard(p) {
-    var opts = pollOpts(p), open = p.status === "open";
-    var mine = (p.userVotes || []).map(function (v) { return v.option_id; });
-    var voted = mine.length > 0, me = session && session.user_id;
-    var canVote = open && !voted && myRole() !== "viewer";
-    var total = opts.reduce(function (s, o) { return s + (Number(o.vote_count) || 0); }, 0);
+    var opts = pollOpts(p), open = p.status === "open", tie = pollTie(p);
+    var myPick = p.myBallot && p.myBallot.payload && !p.myBallot.abstain ? p.myBallot.payload.optionId : null;
+    var canVote = open && !tie && myRole() !== "viewer" && !!myRole();
+    var tally = (p.result && p.result.tally) || {};
+    var total = Number(p.ballotCount) || 0;
+    var winner = p.result && p.result.winnerOptionId;
     var html = '<div class="poll" data-poll="' + esc(p.id) + '"><div class="q">' + esc(p.question) + "</div>";
     if (canVote) {
       html += opts.map(function (o) {
-        return '<label class="opt"><input type="radio" name="pv_' + esc(p.id) + '" value="' + esc(o.id) + '"><span>' + esc(o.text) + "</span></label>";
+        return '<label class="opt"><input type="radio" name="pv_' + esc(p.id) + '" value="' + esc(o.id) + '"' + (myPick === o.id ? " checked" : "") + "><span>" + esc(o.label) + "</span></label>";
       }).join("");
     } else {
+      var sum = opts.reduce(function (s, o) { return s + (Number(tally[o.id]) || 0); }, 0);
       html += opts.map(function (o) {
-        var n = Number(o.vote_count) || 0, pct = total ? Math.round(n * 100 / total) : 0;
-        var win = !open && p.result_winner === o.id;
-        return '<div class="bar"><div class="lbl">' + esc(o.text) + (mine.indexOf(o.id) >= 0 ? " (your vote)" : "") + (win ? " &mdash; chosen" : "") + "</div>"
-          + '<div class="track"><div class="fill" style="width:' + pct + '%"></div></div><div class="num">' + n + "</div></div>";
+        var n = Number(tally[o.id]) || 0, pct = sum ? Math.round(n * 100 / sum) : 0;
+        var win = !open && winner === o.id;
+        return '<div class="bar"><div class="lbl">' + esc(o.label) + (myPick === o.id ? " (your vote)" : "") + (win ? " &mdash; chosen" : "") + "</div>"
+          + '<div class="track"><div class="fill" style="width:' + pct + '%"></div></div><div class="num">' + (open && !tie ? "" : n) + "</div>"
+          + (tie && pollCanManage() ? '<button class="ghost tiny" type="button" data-pick="' + esc(o.id) + '">Pick this</button>' : "")
+          + "</div>";
       }).join("");
     }
-    var status = open
-      ? (voted ? "You've voted. " : "") + total + (total === 1 ? " vote so far" : " votes so far")
-      : "Closed" + (p.result_winner ? "" : total ? " with no clear winner" : " with no votes");
-    if (open && !voted && myRole() === "viewer") status = "Viewers can see polls but not vote. " + status;
+    var status;
+    if (tie) status = pollCanManage() ? "It's a tie. Pick the winner above." : "It's a tie. An organizer will pick the winner.";
+    else if (open) status = (myPick ? "You've voted; you can change it until the poll closes. " : "") + total + (total === 1 ? " vote so far" : " votes so far");
+    else status = "Closed" + (winner ? "" : total ? " with no clear winner" : " with no votes");
+    if (open && !tie && myRole() === "viewer") status = "Viewers can see polls but not vote. " + status;
     html += '<div class="acts">'
-      + (canVote ? '<button class="tiny" type="button" data-vote>Vote</button>' : "")
-      + (open && (pollIsOrganizer() || (p.created_by && p.created_by === me)) ? '<button class="ghost tiny" type="button" data-close>Close poll</button>' : "")
+      + (canVote ? '<button class="tiny" type="button" data-vote>' + (myPick ? "Change vote" : "Vote") + "</button>" : "")
+      + (open && !tie && pollCanManage() ? '<button class="ghost tiny" type="button" data-close>Close poll</button>' : "")
       + '<span class="note tiny">' + esc(status) + "</span></div></div>";
     return html;
   }
@@ -3329,7 +3325,7 @@
     $("pollCount").className = "chip " + (open.length ? "acc" : "mute");
     if (!list.length) {
       $("pollList").innerHTML = '<p class="note" style="margin:0">'
-        + (pollIsOrganizer() ? "No polls yet. Start one when the group needs to decide something." : "No polls yet. Organizers can start one when the group needs to decide something.")
+        + (pollCanStart() ? "No polls yet. Start one when the group needs to decide something." : "No polls yet. Anyone who can edit the trip can start one.")
         + "</p>";
       return;
     }
@@ -3339,22 +3335,35 @@
   $("pollList").addEventListener("click", async function (e) {
     var card = e.target.closest(".poll");
     if (!card) return;
-    var pollId = card.getAttribute("data-poll"), btn;
+    var pollId = card.getAttribute("data-poll"), btn, seq = polls.seq, r = null;
     if ((btn = e.target.closest("[data-vote]"))) {
       var pick = card.querySelector('input[type="radio"]:checked');
       if (!pick) { setMsg("pollMsg", "Pick a choice first, then tap Vote.", true); return; }
       if (btn.disabled) return;
       btn.disabled = true;
-      var r = null, seq = polls.seq;
-      try { r = await fnPost("voting-system", { action: "cast_vote", pollId: pollId, choices: [{ optionId: pick.value, rank: 1 }] }); } catch (e2) { r = null; }
+      try { r = await pollFn("PUT", "/polls/" + encodeURIComponent(pollId) + "/ballot", { strategy: "majority", optionId: pick.value }); } catch (e2) { r = null; }
       if (seq !== polls.seq) return;
-      if (!r || !r.ok || !r.data || !r.data.voted) {
+      if (!r || !r.ok || !r.data || !r.data.success) {
         btn.disabled = false;
         setMsg("pollMsg", pollErrMsg(r, "Your vote didn't go through. Try again in a moment."), true);
-        if (r && (r.status === 409 || r.status === 410 || r.status === 404)) loadPolls();
+        if (r && (r.status === 409 || r.status === 404)) loadPolls();
         return;
       }
-      setMsg("pollMsg", r.data.autoClosedPoll ? "Thanks for voting. Everyone has voted, so the poll is now closed." : "Thanks, your vote is in.");
+      setMsg("pollMsg", "Thanks, your vote is in.");
+      loadPolls();
+      return;
+    }
+    if ((btn = e.target.closest("[data-pick]"))) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try { r = await pollFn("POST", "/polls/" + encodeURIComponent(pollId) + "/organizer-choice", { optionId: btn.getAttribute("data-pick") }); } catch (e4) { r = null; }
+      if (seq !== polls.seq) return;
+      if (!r || !r.ok) {
+        btn.disabled = false;
+        setMsg("pollMsg", pollErrMsg(r, "The winner couldn't be saved right now. Try again in a moment."), true);
+        return;
+      }
+      setMsg("pollMsg", "Winner picked. The poll is closed.");
       loadPolls();
       return;
     }
@@ -3364,17 +3373,17 @@
       if (!armButton(btn, "Tap again to close", pollCloseTimer)) return;
       clearTimeout(pollCloseTimer.t);
       btn.disabled = true;
-      var rc = null, seq2 = polls.seq;
-      try { rc = await fnPost("voting-system", { action: "close_poll", pollId: pollId }); } catch (e3) { rc = null; }
-      if (seq2 !== polls.seq) return;
-      if (!rc || !rc.ok) {
+      try { r = await pollFn("POST", "/polls/" + encodeURIComponent(pollId) + "/close"); } catch (e3) { r = null; }
+      if (seq !== polls.seq) return;
+      if (!r || !r.ok) {
         disarmButton(btn);
         btn.disabled = false;
-        setMsg("pollMsg", pollErrMsg(rc, "The poll couldn't be closed right now. Try again in a moment."), true);
-        if (rc && (rc.status === 409 || rc.status === 404)) loadPolls();
+        setMsg("pollMsg", pollErrMsg(r, "The poll couldn't be closed right now. Try again in a moment."), true);
+        if (r && (r.status === 409 || r.status === 404)) loadPolls();
         return;
       }
-      setMsg("pollMsg", "Poll closed.");
+      var d = r.data || {};
+      setMsg("pollMsg", d.tieBreak && d.tieBreak.step === 6 ? "It's a tie, so the poll stays open until an organizer picks the winner." : "Poll closed.");
       loadPolls();
     }
   });
@@ -3414,7 +3423,7 @@
   });
   $("savePoll").addEventListener("click", async function () {
     var t = currentTrip(), btn = this, err = $("pollErr");
-    if (!t || !polls.groupId || btn.disabled) return;
+    if (!t || btn.disabled) return;
     err.hidden = true;
     var q = $("plQ").value.trim();
     var opts = Array.prototype.map.call($("plOpts").querySelectorAll(".plOpt"), function (i) { return i.value.trim(); }).filter(Boolean);
@@ -3423,13 +3432,13 @@
     var seen = {};
     for (var i = 0; i < opts.length; i++) {
       var k = opts[i].toLowerCase();
-      if (seen[k]) { err.textContent = POLL_MSG.DUPLICATE_OPTION_TEXT; err.hidden = false; return; }
+      if (seen[k]) { err.textContent = "Each choice needs to be different."; err.hidden = false; return; }
       seen[k] = true;
     }
     btn.disabled = true;
     var r = null, tripId = t.id;
     try {
-      r = await fnPost("voting-system", { action: "create_poll", groupId: polls.groupId, tripId: tripId, question: q.slice(0, 200), options: opts.slice(0, 6), strategy: "majority" });
+      r = await pollFn("POST", "/polls", { tripId: tripId, question: q.slice(0, 200), options: opts.slice(0, 6).map(function (x) { return { label: x.slice(0, 200) }; }), strategy: "majority", quorumPct: 0 });
     } catch (e) { r = null; }
     btn.disabled = false;
     if ((currentTrip() || {}).id !== tripId) return;
