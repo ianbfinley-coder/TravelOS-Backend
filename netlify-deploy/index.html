@@ -1756,7 +1756,9 @@
     var d = r.data, text;
     if (d.paid) {
       text = "Plan: " + (d.plan === "group" ? "Group" : "Pro") + (d.source === "founder" ? " (founder)" : "");
-      if (d.current_period_end) text += " \u00b7 renews " + String(d.current_period_end).slice(0, 10);
+      // A subscription canceled in Manage billing stays paid until its period
+      // ends; say "ends" then, not "renews" (web wave 19).
+      if (d.current_period_end) text += (d.cancel_at_period_end ? " \u00b7 ends " : " \u00b7 renews ") + String(d.current_period_end).slice(0, 10);
     } else {
       text = "Plan: Free";
       if (d.enforced) text += " \u00b7 " + d.owned_trip_limit + " active trip, up to " + d.member_cap + " people per trip";
