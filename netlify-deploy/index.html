@@ -5363,6 +5363,38 @@
   var US_LEVEL = { 1: "Level 1: Exercise normal precautions", 2: "Level 2: Exercise increased caution",
     3: "Level 3: Reconsider travel", 4: "Level 4: Do not travel" };
   var LEVEL_CHIP = { 1: "ok", 2: "warn", 3: "bad", 4: "bad" };
+  // Region-level advice and the reasons given (web wave 22). Region levels
+  // use the US 1-4 scale for both governments; the wording shown is each
+  // government's own.
+  var REGION_LABEL = {
+    US: { 2: "Exercise increased caution", 3: "Reconsider travel", 4: "Do not travel" },
+    UK: { 3: "Against all but essential travel", 4: "Against all travel" }
+  };
+  function advReasonsHtml(s) {
+    var r = Array.isArray(s.commonIssues) ? s.commonIssues.filter(function (x) { return typeof x === "string" && x; }) : [];
+    if (!r.length) return "";
+    return '<p class="tiny" style="margin:4px 0 0">Reasons given: ' + esc(r.join(", ")) + "</p>";
+  }
+  function advRegionsHtml(s) {
+    var regs = Array.isArray(s.regions) ? s.regions.filter(function (x) { return x && typeof x.name === "string" && x.name; }) : [];
+    if (!regs.length) return "";
+    regs = regs.slice().sort(function (a, b) { return (Number(b.level) || 0) - (Number(a.level) || 0); });
+    var labels = REGION_LABEL[s.source === "UK" ? "UK" : "US"];
+    var items = regs.map(function (g) {
+      var lv = Number(g.level), lab = labels[lv] || (lv ? "Level " + lv : "");
+      var places = Array.isArray(g.places) && g.places.length
+        ? '<br><span class="tiny">Covers: ' + esc(g.places.slice(0, 12).join("; ")) + (g.places.length > 12 ? "; …" : "") + "</span>" : "";
+      var txt = String(g.text || "");
+      if (txt.length > 260) txt = txt.slice(0, 257).replace(/\s+\S*$/, "") + "…";
+      return '<li style="margin:6px 0"><b>' + esc(g.name) + "</b>"
+        + (lab ? ' <span class="chip ' + (lv >= 3 ? "bad" : "warn") + '">' + esc(lab) + "</span>" : "")
+        + (txt ? '<br><span class="tiny">' + esc(txt) + "</span>" : "") + places + "</li>";
+    }).join("");
+    var n = regs.length;
+    return '<details style="margin:6px 0 0"><summary class="tiny" style="cursor:pointer">'
+      + "Areas named in this advice (" + n + ")</summary>"
+      + '<ul style="margin:4px 0 0;padding-left:18px">' + items + "</ul></details>";
+  }
   $("advShow").addEventListener("click", async function () {
     var t = currentTrip();
     if (!t) return;
@@ -5404,6 +5436,7 @@
         return '<div class="dim"><div class="top"><b>' + esc(who) + "</b>"
           + (label ? '<span class="chip ' + (LEVEL_CHIP[lvl] || "mute") + '">' + esc(label) + "</span>" : "") + "</div>"
           + (head && !/^no advisory found/i.test(head) ? "<p>" + esc(head) + "</p>" : "<p>No advisory text was available.</p>")
+          + advReasonsHtml(s) + advRegionsHtml(s)
           + '<p class="tiny">' + (s.fetchedAt ? "Checked " + esc(when(s.fetchedAt)) + (s.stale ? " (couldn't refresh, so this may be out of date)" : "") + ". " : "")
           + (url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">Read the official advice</a>' : "") + "</p></div>";
       }).join("") : "";
