@@ -5787,9 +5787,15 @@
         acts += '<button class="tiny danger" type="button" data-remove="' + esc(m.id) + '">Remove</button>';
       }
       var nm = m.display_name;
-      if (!nm || /^(owner|member|organizer|viewer)$/i.test(nm)) nm = m.role === "owner" ? "Trip owner" : "Traveler";
-      return '<div class="it" style="grid-template-columns:minmax(0,1fr) auto"><div class="what"><b>' + esc(nm)
-        + "</b><span>" + esc(ROLE_LABEL[m.role] || m.role) + (guest ? " · guest link, no account" : "") + "</span></div>"
+      var placeholder = !nm || /^(owner|member|organizer|viewer)$/i.test(nm);
+      if (placeholder) nm = m.role === "owner" ? "Trip owner" : "Traveler";
+      var label = esc(nm);
+      if (m.isYou) {
+        label = placeholder ? "You" : esc(nm);
+        acts = '<button class="tiny ghost" type="button" data-rename="1" data-current="' + esc(placeholder ? "" : nm) + '">' + (placeholder ? "Set your name" : "Change name") + "</button>";
+      }
+      return '<div class="it" style="grid-template-columns:minmax(0,1fr) auto"' + (m.isYou ? ' data-me="1"' : "") + '><div class="what"><b>' + label
+        + "</b><span>" + (m.isYou && !placeholder ? "You · " : "") + esc(ROLE_LABEL[m.role] || m.role) + (guest ? " · guest link, no account" : "") + "</span></div>"
         + '<div class="acts">' + acts + "</div></div>";
     }).join("") || '<p class="note">Nobody else is on this trip yet.</p>';
   }
@@ -5822,8 +5828,42 @@
     var b = this;
     setTimeout(function () { b.textContent = "Copy link"; }, 2500);
   });
+  async function saveMyName(row) {
+    var t = currentTrip();
+    var inp = row && row.querySelector("input[data-myname]");
+    if (!t || !inp) return;
+    var v = inp.value.replace(/\s+/g, " ").trim();
+    if (!v) { peopleMsg("Enter the name you want others on this trip to see.", true); inp.focus(); return; }
+    if (v.length > 60) { peopleMsg("Keep your name to 60 characters or fewer.", true); inp.focus(); return; }
+    peopleMsg("");
+    row.querySelectorAll("button,input").forEach(function (x) { x.disabled = true; });
+    var r = await call("PATCH", tripsPath(t.id, "/members/me"), { body: { displayName: v } });
+    if (!r.ok) {
+      row.querySelectorAll("button,input").forEach(function (x) { x.disabled = false; });
+      peopleMsg(r.detail || "Could not save your name.", true);
+      return;
+    }
+    await loadPeople();
+    peopleMsg("Saved. Everyone on this trip now sees you as " + v + ".");
+  }
+  $("peopleList").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && e.target.matches("input[data-myname]")) { e.preventDefault(); saveMyName(e.target.closest(".it")); }
+    else if (e.key === "Escape" && e.target.matches("input[data-myname]")) { loadPeople(); }
+  });
   $("peopleList").addEventListener("click", async function (e) {
     var t = currentTrip();
+    var ren = e.target.closest("[data-rename]");
+    if (ren) {
+      var row = ren.closest(".it");
+      row.querySelector(".what").innerHTML = '<input type="text" data-myname="1" maxlength="60" autocomplete="name" aria-label="Your name on this trip" placeholder="Your name on this trip" style="width:100%">';
+      var inp = row.querySelector("input[data-myname]");
+      inp.value = ren.getAttribute("data-current") || "";
+      row.querySelector(".acts").innerHTML = '<button class="tiny" type="button" data-savename="1">Save</button><button class="tiny ghost" type="button" data-cancelname="1">Cancel</button>';
+      inp.focus();
+      return;
+    }
+    if (e.target.closest("[data-savename]")) { saveMyName(e.target.closest(".it")); return; }
+    if (e.target.closest("[data-cancelname]")) { peopleMsg(""); loadPeople(); return; }
     var rot = e.target.closest("[data-rotate]");
     var rem = e.target.closest("[data-remove]");
     var btn = rot || rem;
