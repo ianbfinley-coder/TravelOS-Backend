@@ -802,6 +802,12 @@
       <button id="advShow" class="ghost tiny" type="button">Check advisories</button>
       <p class="note" id="advMsg" style="margin:8px 0 0" hidden></p>
       <div id="advOut"></div>
+
+      <div class="subhead">Weather</div>
+      <p class="note" style="margin:0 0 10px">The forecast for this trip's destination. Forecasts reach about a week ahead, so your trip dates fill in as the trip gets closer. Doesn't use AI credit.</p>
+      <button id="wxShow" class="ghost tiny" type="button">Show weather</button>
+      <p class="note" id="wxMsg" style="margin:8px 0 0" hidden></p>
+      <div id="wxOut"></div>
     </div>
   </section>
 
@@ -5122,6 +5128,121 @@
     }).join("");
     sel.value = safe.picked && keep ? keep : (mine[0] || "");
   }
+  // ── weather (provider-adapters /weather, Open-Meteo) ─────────
+  // Location: the trip's destination, geocoded; if that fails or is a weak
+  // match, the first pinned itinerary stop. The forecast covers about 7 days
+  // from today, so a trip further out gets "this week" plus the date its own
+  // forecast becomes available, never a guess for its dates.
+  var WX_CODE = { 0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Cloudy", 45: "Fog", 48: "Freezing fog",
+    51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle", 56: "Freezing drizzle", 57: "Freezing drizzle",
+    61: "Light rain", 63: "Rain", 65: "Heavy rain", 66: "Freezing rain", 67: "Freezing rain",
+    71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains", 80: "Light showers", 81: "Showers",
+    82: "Heavy showers", 85: "Snow showers", 86: "Heavy snow showers", 95: "Thunderstorms", 96: "Thunderstorms with hail", 99: "Thunderstorms with hail" };
+  function wxFahrenheit() {
+    var t = currentTrip(), lang = String(navigator.language || "").toLowerCase();
+    return lang === "en-us" || (t && String(t.country_code || "").toUpperCase() === "US");
+  }
+  function wxTemp(c) {
+    if (typeof c !== "number" || !isFinite(c)) return "–";
+    return wxFahrenheit() ? Math.round(c * 9 / 5 + 32) + "°F" : Math.round(c) + "°C";
+  }
+  function wxDay(ymd) {
+    var d = new Date(String(ymd) + "T12:00:00");
+    if (isNaN(d)) return String(ymd);
+    return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+  }
+  function wxAddDays(ymd, n) {
+    var d = new Date(String(ymd) + "T12:00:00");
+    if (isNaN(d)) return null;
+    d.setDate(d.getDate() + n);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  async function wxPoint(t) {
+    var dest = String(t.destination || "").trim();
+    if (dest) {
+      var g = null;
+      try { g = await fnGet("provider-adapters", "/geocode?q=" + encodeURIComponent(dest)); } catch (e) { g = null; }
+      var gd = g && g.ok && g.data && g.data.data;
+      if (gd && isFinite(gd.lat) && isFinite(gd.lon) && (gd.relevance == null || gd.relevance >= 0.5)) {
+        return { lat: gd.lat, lon: gd.lon, name: dest };
+      }
+    }
+    var pins = (itinerary || []).filter(function (i) { return i && hasPin(i); });
+    if (pins.length) return { lat: pins[0].lat, lon: pins[0].lng, name: pins[0].location || pins[0].title || "your first stop" };
+    return null;
+  }
+  function wxRows(days) {
+    return days.map(function (d) {
+      var rain = typeof d.precipProb === "number" && isFinite(d.precipProb) ? Math.round(d.precipProb) + "% rain" : "";
+      return '<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid var(--line, rgba(127,127,127,.2))">'
+        + '<span style="min-width:0"><b>' + esc(wxDay(d.date)) + "</b> · " + esc(WX_CODE[d.code] || "—") + "</span>"
+        + '<span style="white-space:nowrap">' + esc(wxTemp(d.maxC)) + " / " + esc(wxTemp(d.minC)) + (rain ? " · " + esc(rain) : "") + "</span></div>";
+    }).join("");
+  }
+  $("wxShow").addEventListener("click", async function () {
+    var t = currentTrip();
+    if (!t) return;
+    var seq = safe.seq, btn = this;
+    btn.disabled = true;
+    setMsg("wxMsg", "Getting the forecast…");
+    $("wxOut").innerHTML = "";
+    try {
+      var pt = await wxPoint(t);
+      if (seq !== safe.seq) return;
+      if (!pt) { setMsg("wxMsg", "Add a destination to this trip, or pin a stop on the itinerary, to see its weather."); return; }
+      var q = "?lat=" + encodeURIComponent(pt.lat) + "&lon=" + encodeURIComponent(pt.lon);
+      var r = null;
+      try { r = await fnGet("provider-adapters", "/weather" + q); } catch (e) { r = null; }
+      if (seq !== safe.seq) return;
+      var env = r && r.ok && r.data;
+      var fc = env && env.data;
+      var daily = fc && Array.isArray(fc.daily) ? fc.daily.filter(function (d) { return d && d.date; }) : [];
+      if (!env || (env.status !== "ok" && env.status !== "stale") || !daily.length) {
+        setMsg("wxMsg", r && r.status === 401 ? VERSION_MSG.UNAUTHORIZED : "The forecast isn't available right now. Try again in a moment.", true);
+        return;
+      }
+      var start = String(t.start_date || ""), end = String(t.end_date || "") || start;
+      var first = daily[0].date, last = daily[daily.length - 1].date;
+      var html = "", heading;
+      var inTrip = start ? daily.filter(function (d) { return d.date >= start && d.date <= end; }) : [];
+      if (inTrip.length) {
+        heading = "Your trip dates";
+        html += wxRows(inTrip);
+        if (end > last) html += '<p class="tiny" style="margin:6px 0 0">Later days fill in as they come within a week.</p>';
+      } else if (start && start > last) {
+        var from = wxAddDays(start, -(daily.length - 1));
+        heading = "This week";
+        html += '<p class="tiny" style="margin:0 0 6px">Your trip starts ' + esc(wxDay(start)) + ". The forecast for your dates will show here from about " + esc(wxDay(from || start)) + ".</p>";
+        html += wxRows(daily);
+      } else {
+        heading = "This week";
+        html += wxRows(daily);
+      }
+      // Active US weather alerts matter only while the trip is within the forecast window.
+      if (inTrip.length && String(t.country_code || "").toUpperCase() === "US") {
+        var a = null;
+        try { a = await fnGet("provider-adapters", "/weather-alerts" + q); } catch (e) { a = null; }
+        if (seq !== safe.seq) return;
+        var alerts = a && a.ok && a.data && a.data.data && Array.isArray(a.data.data.alerts) ? a.data.data.alerts : [];
+        if (alerts.length) {
+          html += '<div style="margin-top:8px">' + alerts.slice(0, 5).map(function (x) {
+            return '<p class="err" style="margin:4px 0">' + esc(String(x.event || "Weather alert")) + (x.headline ? ": " + esc(String(x.headline)) : "") + "</p>";
+          }).join("") + "</div>";
+        }
+      }
+      var pv = env.provenance || {};
+      $("wxOut").innerHTML = '<div class="dim" style="margin-top:8px"><div class="top"><b>' + esc(pt.name) + "</b>"
+        + '<span class="chip mute">' + esc(heading) + "</span></div>" + html
+        + '<p class="tiny" style="margin:8px 0 0">Weather data by Open-Meteo.com'
+        + (pv.fetchedAt ? " · Updated " + esc(when(pv.fetchedAt)) + (env.status === "stale" ? " (couldn't refresh, showing the last forecast)" : "") : "")
+        + "</p></div>";
+      setMsg("wxMsg", "");
+      btn.textContent = "Refresh weather";
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   function safeOnTripChange() {
     var t = currentTrip();
     safe.tripId = t ? t.id : null;
@@ -5131,8 +5252,9 @@
     safe.prep = [];
     safe.prepDomestic = 0;
     safe.prepBusy = {};
-    ["sosOut", "prepOut", "advOut"].forEach(function (id) { $(id).innerHTML = ""; });
-    ["sosMsg", "prepMsg", "advMsg"].forEach(function (id) { setMsg(id, ""); });
+    ["sosOut", "prepOut", "advOut", "wxOut"].forEach(function (id) { $(id).innerHTML = ""; });
+    ["sosMsg", "prepMsg", "advMsg", "wxMsg"].forEach(function (id) { setMsg(id, ""); });
+    $("wxShow").textContent = "Show weather";
     $("prepShow").hidden = false;
     $("advShow").hidden = false;
     sosSyncCountries();
